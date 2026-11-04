@@ -7,23 +7,33 @@
 --   * <x>_key  = clave SUBROGADA (propia del data warehouse). Es la PK de
 --                cada dimensión y la que usan las tablas de hechos.
 --   * <x>_id   = clave NATURAL (el ID del sistema de origen, raw.<tabla>).
---   * Clave -1 = fila "Desconocido / No aplica". Se usa cuando el dato no
---                existe en el origen (NPS anónimo, sesión sin login, pedido
---                online sin tienda) para no dejar FKs en NULL.
+--   * Clave -1 = miembro "Desconocido / No aplica". Toda dimensión que un
+--                hecho puede no tener (cliente anónimo, pedido sin tienda,
+--                fecha de un evento que todavía no ocurrió, código nuevo que
+--                aparezca en el origen) tiene esta fila, así ninguna FK de
+--                los hechos queda en NULL.
 --   * dim_date usa una clave "inteligente" AAAAMMDD (ej. 20240131), que es
 --     la práctica habitual para la dimensión fecha.
+--   * Los catálogos (estados, medios de pago, orígenes, correos...) se cargan
+--     con los valores DISTINTOS que hay en raw/, no escritos a mano: si
+--     mañana aparece un código nuevo, entra solo a la dimensión.
 --
 -- Dimensiones:
---   dim_date            calendario día a día (2024-01-01 a 2025-09-30)
---   dim_channel         canal de venta (ONLINE / OFFLINE)
---   dim_province        provincia (BA, CBA, SF, MZA)
---   dim_product         producto con su categoría y familia aplanadas
---   dim_store           tienda física (+ fila -1 "Online / sin tienda")
---   dim_customer        cliente (+ fila -1 "Anónimo / desconocido")
---   dim_order_status    estado del pedido y si cuenta como venta
---   dim_payment_method  medio de pago
---   dim_traffic_source  origen de la visita web (ads, direct, ...)
---   dim_device          dispositivo de la visita web
+--   dim_date             calendario día a día (+ fila -1 "Sin fecha")
+--   dim_channel          canal de venta (ONLINE / OFFLINE)
+--   dim_province         provincia (BA, CBA, SF, MZA)
+--   dim_address          dirección (calle, ciudad, CP, provincia) (+ -1)
+--   dim_product          producto con su categoría y familia aplanadas
+--   dim_store            tienda física (+ fila -1 "Online / sin tienda")
+--   dim_customer         cliente (+ fila -1 "Anónimo / desconocido")
+--   dim_order_status     estado del pedido y si cuenta como venta (+ -1)
+--   dim_payment_method   medio de pago (+ -1)
+--   dim_payment_status   estado del pago (+ -1)
+--   dim_shipment_status  estado del envío (+ -1)
+--   dim_carrier          empresa de correo (+ -1)
+--   dim_traffic_source   origen de la visita web (+ -1)
+--   dim_device           dispositivo de la visita web (+ -1)
+--   dim_nps_category     categoría NPS: Promotor / Pasivo / Detractor
 -- =====================================================================
 
 
@@ -32,22 +42,27 @@
 -- ---------------------------------------------------------------------
 -- Cubre todo el período de los datos: el primer pedido es del 01/01/2024 y
 -- la foto del sistema se tomó el 30/09/2025 a las 23:59:59.
+-- Fila -1 "Sin fecha": para eventos que no ocurrieron (pago no cobrado,
+-- envío no despachado / no entregado).
 CREATE TABLE dim_date (
-    date_key        INTEGER PRIMARY KEY,   -- AAAAMMDD
-    full_date       DATE    NOT NULL,
-    year            INTEGER NOT NULL,
-    quarter         INTEGER NOT NULL,      -- 1..4
-    year_quarter    VARCHAR NOT NULL,      -- 2025-T3
-    month           INTEGER NOT NULL,      -- 1..12
+    date_key        INTEGER PRIMARY KEY,   -- AAAAMMDD (-1 = sin fecha)
+    full_date       DATE,                  -- NULL solo en la fila -1
+    year            INTEGER,
+    quarter         INTEGER,               -- 1..4
+    year_quarter    VARCHAR NOT NULL,      -- 2025-T3 ('Sin fecha' en la fila -1)
+    month           INTEGER,               -- 1..12
     month_name      VARCHAR NOT NULL,      -- Enero..Diciembre
     year_month      VARCHAR NOT NULL,      -- 2025-09
-    month_start     DATE    NOT NULL,      -- primer día del mes (para DATE_TRUNC)
-    iso_week        INTEGER NOT NULL,
-    day_of_month    INTEGER NOT NULL,
-    day_of_week     INTEGER NOT NULL,      -- 1 = lunes ... 7 = domingo (ISO)
+    month_start     DATE,                  -- primer día del mes (= DATE_TRUNC('month', ...))
+    iso_week        INTEGER,
+    day_of_month    INTEGER,
+    day_of_week     INTEGER,               -- 1 = lunes ... 7 = domingo (ISO)
     day_name        VARCHAR NOT NULL,      -- Lunes..Domingo
-    is_weekend      BOOLEAN NOT NULL
+    is_weekend      BOOLEAN
 );
+
+INSERT INTO dim_date VALUES
+    (-1, NULL, NULL, NULL, 'Sin fecha', NULL, 'Sin fecha', 'Sin fecha', NULL, NULL, NULL, NULL, 'Sin fecha', NULL);
 
 INSERT INTO dim_date
 SELECT
@@ -69,7 +84,8 @@ SELECT
 FROM (
     SELECT CAST(range AS DATE) AS d
     FROM range(DATE '2024-01-01', DATE '2025-10-01', INTERVAL 1 DAY)
-);
+)
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -88,7 +104,8 @@ SELECT
     channel_id,
     code,
     name
-FROM raw.channel;
+FROM raw.channel
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -114,7 +131,52 @@ SELECT
         WHEN 'SF'  THEN 'AR-S'
         WHEN 'MZA' THEN 'AR-M'
     END AS iso_3166_2
-FROM raw.province;
+FROM raw.province
+ORDER BY 1;
+
+
+-- ---------------------------------------------------------------------
+-- dim_address — dirección (geografía al nivel más fino)
+-- ---------------------------------------------------------------------
+-- Conserva ciudad y código postal, que no entran en ninguna otra dimensión.
+-- La provincia se aplana (nombre y código) para no tener que encadenar
+-- dimensiones (copo de nieve). address_type distingue las direcciones de
+-- tiendas de las de clientes.
+-- Fila -1: pedidos sin dirección de facturación (billing_address_id NULL).
+CREATE TABLE dim_address (
+    address_key     INTEGER PRIMARY KEY,
+    address_id      BIGINT,                  -- NULL en la fila -1
+    line1           VARCHAR,
+    line2           VARCHAR,
+    city            VARCHAR NOT NULL,
+    postal_code     VARCHAR,
+    country_code    VARCHAR,
+    province_name   VARCHAR NOT NULL,
+    province_code   VARCHAR NOT NULL,
+    address_type    VARCHAR NOT NULL,        -- Tienda / Cliente / Desconocida
+    created_at      TIMESTAMP
+);
+
+INSERT INTO dim_address VALUES
+    (-1, NULL, NULL, NULL, 'Desconocida', NULL, NULL, 'Desconocida', '?', 'Desconocida', NULL);
+
+INSERT INTO dim_address
+SELECT
+    ROW_NUMBER() OVER (ORDER BY a.address_id)       AS address_key,
+    a.address_id,
+    a.line1,
+    a.line2,
+    a.city,
+    CAST(a.postal_code AS VARCHAR)                  AS postal_code,
+    a.country_code,
+    p.name                                          AS province_name,
+    p.code                                          AS province_code,
+    CASE WHEN a.address_id IN (SELECT address_id FROM raw.store)
+         THEN 'Tienda' ELSE 'Cliente' END           AS address_type,
+    a.created_at
+FROM raw.address  AS a
+JOIN raw.province AS p ON p.province_id = a.province_id
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -146,7 +208,8 @@ SELECT
     CASE p.status WHEN 'A' THEN 'Activo' ELSE 'Inactivo' END AS status
 FROM raw.product AS p
 LEFT JOIN raw.product_category AS c ON c.category_id = p.category_id   -- categoría
-LEFT JOIN raw.product_category AS f ON f.category_id = c.parent_id;    -- familia (categoría padre)
+LEFT JOIN raw.product_category AS f ON f.category_id = c.parent_id     -- familia (categoría padre)
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -177,7 +240,8 @@ SELECT
     p.code       AS province_code
 FROM raw.store    AS s
 JOIN raw.address  AS a ON a.address_id  = s.address_id
-JOIN raw.province AS p ON p.province_id = a.province_id;
+JOIN raw.province AS p ON p.province_id = a.province_id
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -216,14 +280,15 @@ SELECT
     created_at,
     CAST(created_at AS DATE)                 AS created_date,
     strftime(created_at, '%Y-%m')            AS cohort_month
-FROM raw.customer;
+FROM raw.customer
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
 -- dim_order_status — estado del pedido
 -- ---------------------------------------------------------------------
--- Dimensión chica que deja documentada la regla de negocio de qué cuenta
--- como venta: solo PAID y FULFILLED (según la consigna y el README).
+-- Documenta la regla de negocio de qué cuenta como venta: solo PAID y
+-- FULFILLED (según la consigna). Un estado desconocido NO cuenta como venta.
 CREATE TABLE dim_order_status (
     status_key    INTEGER PRIMARY KEY,
     status_code   VARCHAR NOT NULL UNIQUE,
@@ -231,12 +296,23 @@ CREATE TABLE dim_order_status (
     is_sale       BOOLEAN NOT NULL
 );
 
-INSERT INTO dim_order_status VALUES
-    (1, 'CREATED',   'Creado, todavía sin pagar',            FALSE),
-    (2, 'PAID',      'Pagado, pendiente de entrega',         TRUE),
-    (3, 'FULFILLED', 'Entregado / comprado en tienda',       TRUE),
-    (4, 'CANCELLED', 'Cancelado',                            FALSE),
-    (5, 'REFUNDED',  'Entregado y luego reembolsado',        FALSE);
+INSERT INTO dim_order_status VALUES (-1, 'UNKNOWN', 'Estado desconocido', FALSE);
+
+INSERT INTO dim_order_status
+SELECT
+    ROW_NUMBER() OVER (ORDER BY status) AS status_key,
+    status                              AS status_code,
+    CASE status
+        WHEN 'CREATED'   THEN 'Creado, todavía sin pagar'
+        WHEN 'PAID'      THEN 'Pagado, pendiente de entrega'
+        WHEN 'FULFILLED' THEN 'Entregado / comprado en tienda'
+        WHEN 'CANCELLED' THEN 'Cancelado'
+        WHEN 'REFUNDED'  THEN 'Entregado y luego reembolsado'
+        ELSE status
+    END                                 AS description,
+    status IN ('PAID', 'FULFILLED')     AS is_sale
+FROM (SELECT DISTINCT status FROM raw.sales_order WHERE status IS NOT NULL)
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -248,30 +324,133 @@ CREATE TABLE dim_payment_method (
     description         VARCHAR NOT NULL
 );
 
-INSERT INTO dim_payment_method VALUES
-    (1, 'CARD',     'Tarjeta'),
-    (2, 'GATEWAY',  'Mercado Pago (pasarela)'),
-    (3, 'CASH',     'Efectivo'),
-    (4, 'TRANSFER', 'Transferencia');
+INSERT INTO dim_payment_method VALUES (-1, 'UNKNOWN', 'Sin dato');
+
+INSERT INTO dim_payment_method
+SELECT
+    ROW_NUMBER() OVER (ORDER BY method) AS payment_method_key,
+    method                              AS method_code,
+    CASE method
+        WHEN 'CARD'     THEN 'Tarjeta'
+        WHEN 'GATEWAY'  THEN 'Mercado Pago (pasarela)'
+        WHEN 'CASH'     THEN 'Efectivo'
+        WHEN 'TRANSFER' THEN 'Transferencia'
+        ELSE method
+    END                                 AS description
+FROM (SELECT DISTINCT method FROM raw.payment WHERE method IS NOT NULL)
+ORDER BY 1;
+
+
+-- ---------------------------------------------------------------------
+-- dim_payment_status — estado del pago
+-- ---------------------------------------------------------------------
+CREATE TABLE dim_payment_status (
+    payment_status_key  INTEGER PRIMARY KEY,
+    status_code         VARCHAR NOT NULL UNIQUE,
+    description         VARCHAR NOT NULL,
+    is_collected        BOOLEAN NOT NULL       -- el dinero ingresó (PAID)
+);
+
+INSERT INTO dim_payment_status VALUES (-1, 'UNKNOWN', 'Sin dato', FALSE);
+
+INSERT INTO dim_payment_status
+SELECT
+    ROW_NUMBER() OVER (ORDER BY status) AS payment_status_key,
+    status                              AS status_code,
+    CASE status
+        WHEN 'PENDING'  THEN 'Pendiente'
+        WHEN 'PAID'     THEN 'Cobrado'
+        WHEN 'FAILED'   THEN 'Rechazado'
+        WHEN 'REFUNDED' THEN 'Reembolsado'
+        ELSE status
+    END                                 AS description,
+    status = 'PAID'                     AS is_collected
+FROM (SELECT DISTINCT status FROM raw.payment WHERE status IS NOT NULL)
+ORDER BY 1;
+
+
+-- ---------------------------------------------------------------------
+-- dim_shipment_status — estado del envío
+-- ---------------------------------------------------------------------
+CREATE TABLE dim_shipment_status (
+    shipment_status_key  INTEGER PRIMARY KEY,
+    status_code          VARCHAR NOT NULL UNIQUE,
+    description          VARCHAR NOT NULL,
+    is_delivered         BOOLEAN NOT NULL
+);
+
+INSERT INTO dim_shipment_status VALUES (-1, 'UNKNOWN', 'Sin dato', FALSE);
+
+INSERT INTO dim_shipment_status
+SELECT
+    ROW_NUMBER() OVER (ORDER BY status) AS shipment_status_key,
+    status                              AS status_code,
+    CASE status
+        WHEN 'READY'     THEN 'En preparación'
+        WHEN 'SHIPPED'   THEN 'En viaje'
+        WHEN 'DELIVERED' THEN 'Entregado'
+        WHEN 'CANCELLED' THEN 'Cancelado (no salió)'
+        ELSE status
+    END                                 AS description,
+    status = 'DELIVERED'                AS is_delivered
+FROM (SELECT DISTINCT status FROM raw.shipment WHERE status IS NOT NULL)
+ORDER BY 1;
+
+
+-- ---------------------------------------------------------------------
+-- dim_carrier — empresa de correo
+-- ---------------------------------------------------------------------
+CREATE TABLE dim_carrier (
+    carrier_key   INTEGER PRIMARY KEY,
+    name          VARCHAR NOT NULL UNIQUE
+);
+
+INSERT INTO dim_carrier VALUES (-1, 'Sin dato');
+
+INSERT INTO dim_carrier
+SELECT
+    ROW_NUMBER() OVER (ORDER BY carrier) AS carrier_key,
+    carrier                              AS name
+FROM (SELECT DISTINCT carrier FROM raw.shipment WHERE carrier IS NOT NULL)
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
 -- dim_traffic_source — origen de la visita web
 -- ---------------------------------------------------------------------
--- Agrupa los orígenes según la acción de marketing que los genera.
+-- marketing_type agrupa los orígenes según quién "paga" el tráfico
+-- (clasificación propia, ver README > Supuestos):
+--   Pago   = publicidad (ads)         Propio = canales de la marca (direct, referral/newsletter)
+--   Ganado = buscadores (organic)
 CREATE TABLE dim_traffic_source (
     source_key      INTEGER PRIMARY KEY,
     source_code     VARCHAR NOT NULL UNIQUE,
     description     VARCHAR NOT NULL,
-    marketing_type  VARCHAR NOT NULL      -- Pago / Propio / Ganado
+    marketing_type  VARCHAR NOT NULL      -- Pago / Propio / Ganado / Sin dato
 );
 
-INSERT INTO dim_traffic_source VALUES
-    (-1, 'unknown',  'Sin dato',                        'Sin dato'),
-    ( 1, 'ads',      'Publicidad en redes',             'Pago'),
-    ( 2, 'direct',   'Directo / newsletter',            'Propio'),
-    ( 3, 'referral', 'Referidos / newsletter',          'Propio'),
-    ( 4, 'organic',  'Buscadores (orgánico)',           'Ganado');
+INSERT INTO dim_traffic_source VALUES (-1, 'unknown', 'Sin dato', 'Sin dato');
+
+INSERT INTO dim_traffic_source
+SELECT
+    ROW_NUMBER() OVER (ORDER BY source) AS source_key,
+    source                              AS source_code,
+    CASE source
+        WHEN 'ads'      THEN 'Publicidad en redes'
+        WHEN 'direct'   THEN 'Directo / newsletter'
+        WHEN 'referral' THEN 'Referidos / newsletter'
+        WHEN 'organic'  THEN 'Buscadores (orgánico)'
+        ELSE source
+    END                                 AS description,
+    CASE source
+        WHEN 'ads'      THEN 'Pago'
+        WHEN 'direct'   THEN 'Propio'
+        WHEN 'referral' THEN 'Propio'
+        WHEN 'organic'  THEN 'Ganado'
+        ELSE 'Sin dato'
+    END                                 AS marketing_type
+FROM (SELECT DISTINCT source FROM raw.web_session WHERE source IS NOT NULL)
+ORDER BY 1;
 
 
 -- ---------------------------------------------------------------------
@@ -283,9 +462,9 @@ CREATE TABLE dim_device (
     description  VARCHAR NOT NULL
 );
 
+INSERT INTO dim_device VALUES (-1, 'unknown', 'Sin dato');
+
 INSERT INTO dim_device
-SELECT -1, 'unknown', 'Sin dato'
-UNION ALL
 SELECT
     ROW_NUMBER() OVER (ORDER BY device) AS device_key,
     device                              AS device_code,
@@ -295,4 +474,25 @@ SELECT
         WHEN 'tablet'  THEN 'Tablet'
         ELSE device
     END                                 AS description
-FROM (SELECT DISTINCT device FROM raw.web_session WHERE device IS NOT NULL);
+FROM (SELECT DISTINCT device FROM raw.web_session WHERE device IS NOT NULL)
+ORDER BY 1;
+
+
+-- ---------------------------------------------------------------------
+-- dim_nps_category — categoría de la respuesta NPS
+-- ---------------------------------------------------------------------
+-- Rangos fijados por la definición del NPS (consigna): 9-10 promotor,
+-- 7-8 pasivo, 0-6 detractor. nps_points es el aporte de cada respuesta:
+-- NPS = SUM(nps_points) / cantidad de respuestas.
+CREATE TABLE dim_nps_category (
+    nps_category_key  INTEGER PRIMARY KEY,
+    name              VARCHAR NOT NULL UNIQUE,
+    min_score         SMALLINT NOT NULL,
+    max_score         SMALLINT NOT NULL,
+    nps_points        INTEGER NOT NULL        -- +100 / 0 / -100
+);
+
+INSERT INTO dim_nps_category VALUES
+    (1, 'Detractor', 0, 6, -100),
+    (2, 'Pasivo',    7, 8,    0),
+    (3, 'Promotor',  9, 10, 100);
