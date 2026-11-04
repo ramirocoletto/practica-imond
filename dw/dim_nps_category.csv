@@ -1,0 +1,4 @@
+nps_category_key,name,min_score,max_score,nps_points
+1,Detractor,0,6,-100
+2,Pasivo,7,8,0
+3,Promotor,9,10,100

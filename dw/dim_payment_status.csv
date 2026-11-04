@@ -1,0 +1,6 @@
+payment_status_key,status_code,description,is_collected
+-1,UNKNOWN,Sin dato,false
+1,FAILED,Rechazado,false
+2,PAID,Cobrado,true
+3,PENDING,Pendiente,false
+4,REFUNDED,Reembolsado,false

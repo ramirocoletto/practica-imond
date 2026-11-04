@@ -1,0 +1,162 @@
+year_month,year_quarter,channel_key,channel_name,province_key,province_code,province_name,envios_entregados,suma_dias_entrega
+2024-01,2024-T1,1,Tienda Online,1,BA,Buenos Aires,96,316.46
+2024-01,2024-T1,1,Tienda Online,2,CBA,Córdoba,64,376.92
+2024-01,2024-T1,1,Tienda Online,3,SF,Santa Fe,72,357.99
+2024-01,2024-T1,1,Tienda Online,4,MZA,Mendoza,30,146.75
+2024-01,2024-T1,2,Tiendas Físicas,1,BA,Buenos Aires,4,14.86
+2024-01,2024-T1,2,Tiendas Físicas,2,CBA,Córdoba,2,7.46
+2024-01,2024-T1,2,Tiendas Físicas,3,SF,Santa Fe,1,4.01
+2024-01,2024-T1,2,Tiendas Físicas,4,MZA,Mendoza,4,11.59
+2024-02,2024-T1,1,Tienda Online,1,BA,Buenos Aires,110,381.73
+2024-02,2024-T1,1,Tienda Online,2,CBA,Córdoba,82,452.86
+2024-02,2024-T1,1,Tienda Online,3,SF,Santa Fe,63,335.99
+2024-02,2024-T1,1,Tienda Online,4,MZA,Mendoza,40,219.07
+2024-02,2024-T1,2,Tiendas Físicas,1,BA,Buenos Aires,6,23.48
+2024-02,2024-T1,2,Tiendas Físicas,2,CBA,Córdoba,1,4.15
+2024-02,2024-T1,2,Tiendas Físicas,3,SF,Santa Fe,6,23.15
+2024-02,2024-T1,2,Tiendas Físicas,4,MZA,Mendoza,3,10.83
+2024-03,2024-T1,1,Tienda Online,1,BA,Buenos Aires,115,383.42
+2024-03,2024-T1,1,Tienda Online,2,CBA,Córdoba,54,295.05
+2024-03,2024-T1,1,Tienda Online,3,SF,Santa Fe,62,318.38
+2024-03,2024-T1,1,Tienda Online,4,MZA,Mendoza,31,176.22
+2024-03,2024-T1,2,Tiendas Físicas,1,BA,Buenos Aires,3,7.41
+2024-03,2024-T1,2,Tiendas Físicas,2,CBA,Córdoba,2,4.35
+2024-03,2024-T1,2,Tiendas Físicas,3,SF,Santa Fe,2,5.79
+2024-03,2024-T1,2,Tiendas Físicas,4,MZA,Mendoza,5,20.19
+2024-04,2024-T2,1,Tienda Online,1,BA,Buenos Aires,107,388.61
+2024-04,2024-T2,1,Tienda Online,2,CBA,Córdoba,51,293.65
+2024-04,2024-T2,1,Tienda Online,3,SF,Santa Fe,62,356.08
+2024-04,2024-T2,1,Tienda Online,4,MZA,Mendoza,33,175.27
+2024-04,2024-T2,2,Tiendas Físicas,1,BA,Buenos Aires,3,9.34
+2024-04,2024-T2,2,Tiendas Físicas,2,CBA,Córdoba,3,12.66
+2024-04,2024-T2,2,Tiendas Físicas,3,SF,Santa Fe,1,1.66
+2024-05,2024-T2,1,Tienda Online,1,BA,Buenos Aires,125,478.10
+2024-05,2024-T2,1,Tienda Online,2,CBA,Córdoba,62,377.09
+2024-05,2024-T2,1,Tienda Online,3,SF,Santa Fe,71,395.72
+2024-05,2024-T2,1,Tienda Online,4,MZA,Mendoza,41,247.86
+2024-05,2024-T2,2,Tiendas Físicas,1,BA,Buenos Aires,6,19.27
+2024-05,2024-T2,2,Tiendas Físicas,3,SF,Santa Fe,1,4.86
+2024-05,2024-T2,2,Tiendas Físicas,4,MZA,Mendoza,2,4.45
+2024-06,2024-T2,1,Tienda Online,1,BA,Buenos Aires,127,469.15
+2024-06,2024-T2,1,Tienda Online,2,CBA,Córdoba,65,372.42
+2024-06,2024-T2,1,Tienda Online,3,SF,Santa Fe,75,420.18
+2024-06,2024-T2,1,Tienda Online,4,MZA,Mendoza,47,273.44
+2024-06,2024-T2,2,Tiendas Físicas,1,BA,Buenos Aires,3,24.72
+2024-06,2024-T2,2,Tiendas Físicas,2,CBA,Córdoba,2,6.12
+2024-06,2024-T2,2,Tiendas Físicas,3,SF,Santa Fe,3,4.86
+2024-06,2024-T2,2,Tiendas Físicas,4,MZA,Mendoza,1,4.79
+2024-07,2024-T3,1,Tienda Online,1,BA,Buenos Aires,95,770.06
+2024-07,2024-T3,1,Tienda Online,2,CBA,Córdoba,38,381.27
+2024-07,2024-T3,1,Tienda Online,3,SF,Santa Fe,56,573.81
+2024-07,2024-T3,1,Tienda Online,4,MZA,Mendoza,27,273.80
+2024-07,2024-T3,2,Tiendas Físicas,1,BA,Buenos Aires,3,21.85
+2024-07,2024-T3,2,Tiendas Físicas,2,CBA,Córdoba,1,10.00
+2024-07,2024-T3,2,Tiendas Físicas,3,SF,Santa Fe,4,32.48
+2024-07,2024-T3,2,Tiendas Físicas,4,MZA,Mendoza,4,34.31
+2024-08,2024-T3,1,Tienda Online,1,BA,Buenos Aires,123,999.18
+2024-08,2024-T3,1,Tienda Online,2,CBA,Córdoba,58,575.98
+2024-08,2024-T3,1,Tienda Online,3,SF,Santa Fe,59,586.41
+2024-08,2024-T3,1,Tienda Online,4,MZA,Mendoza,24,226.54
+2024-08,2024-T3,2,Tiendas Físicas,1,BA,Buenos Aires,2,14.27
+2024-08,2024-T3,2,Tiendas Físicas,2,CBA,Córdoba,3,22.09
+2024-08,2024-T3,2,Tiendas Físicas,3,SF,Santa Fe,4,31.52
+2024-08,2024-T3,2,Tiendas Físicas,4,MZA,Mendoza,3,28.76
+2024-09,2024-T3,1,Tienda Online,1,BA,Buenos Aires,105,344.44
+2024-09,2024-T3,1,Tienda Online,2,CBA,Córdoba,58,290.55
+2024-09,2024-T3,1,Tienda Online,3,SF,Santa Fe,65,305.13
+2024-09,2024-T3,1,Tienda Online,4,MZA,Mendoza,28,152.24
+2024-09,2024-T3,2,Tiendas Físicas,1,BA,Buenos Aires,5,17.19
+2024-09,2024-T3,2,Tiendas Físicas,2,CBA,Córdoba,2,8.11
+2024-09,2024-T3,2,Tiendas Físicas,4,MZA,Mendoza,4,9.34
+2024-10,2024-T4,1,Tienda Online,1,BA,Buenos Aires,119,401.05
+2024-10,2024-T4,1,Tienda Online,2,CBA,Córdoba,75,417.95
+2024-10,2024-T4,1,Tienda Online,3,SF,Santa Fe,82,432.26
+2024-10,2024-T4,1,Tienda Online,4,MZA,Mendoza,51,288.76
+2024-10,2024-T4,2,Tiendas Físicas,1,BA,Buenos Aires,3,7.77
+2024-10,2024-T4,2,Tiendas Físicas,2,CBA,Córdoba,2,6.65
+2024-10,2024-T4,2,Tiendas Físicas,3,SF,Santa Fe,5,17.71
+2024-10,2024-T4,2,Tiendas Físicas,4,MZA,Mendoza,2,4.99
+2024-11,2024-T4,1,Tienda Online,1,BA,Buenos Aires,159,631.59
+2024-11,2024-T4,1,Tienda Online,2,CBA,Córdoba,89,548.21
+2024-11,2024-T4,1,Tienda Online,3,SF,Santa Fe,72,425.84
+2024-11,2024-T4,1,Tienda Online,4,MZA,Mendoza,53,317.86
+2024-11,2024-T4,2,Tiendas Físicas,1,BA,Buenos Aires,2,8.37
+2024-11,2024-T4,2,Tiendas Físicas,2,CBA,Córdoba,2,10.59
+2024-11,2024-T4,2,Tiendas Físicas,3,SF,Santa Fe,3,17.89
+2024-11,2024-T4,2,Tiendas Físicas,4,MZA,Mendoza,4,14.00
+2024-12,2024-T4,1,Tienda Online,1,BA,Buenos Aires,220,1090.69
+2024-12,2024-T4,1,Tienda Online,2,CBA,Córdoba,93,695.17
+2024-12,2024-T4,1,Tienda Online,3,SF,Santa Fe,111,805.61
+2024-12,2024-T4,1,Tienda Online,4,MZA,Mendoza,70,481.47
+2024-12,2024-T4,2,Tiendas Físicas,1,BA,Buenos Aires,3,19.16
+2024-12,2024-T4,2,Tiendas Físicas,2,CBA,Córdoba,7,31.27
+2024-12,2024-T4,2,Tiendas Físicas,3,SF,Santa Fe,2,15.92
+2024-12,2024-T4,2,Tiendas Físicas,4,MZA,Mendoza,2,13.09
+2025-01,2025-T1,1,Tienda Online,1,BA,Buenos Aires,145,487.46
+2025-01,2025-T1,1,Tienda Online,2,CBA,Córdoba,75,418.05
+2025-01,2025-T1,1,Tienda Online,3,SF,Santa Fe,71,375.44
+2025-01,2025-T1,1,Tienda Online,4,MZA,Mendoza,50,266.95
+2025-01,2025-T1,2,Tiendas Físicas,1,BA,Buenos Aires,4,12.96
+2025-01,2025-T1,2,Tiendas Físicas,2,CBA,Córdoba,3,12.55
+2025-01,2025-T1,2,Tiendas Físicas,3,SF,Santa Fe,4,13.71
+2025-01,2025-T1,2,Tiendas Físicas,4,MZA,Mendoza,2,8.77
+2025-02,2025-T1,1,Tienda Online,1,BA,Buenos Aires,156,534.03
+2025-02,2025-T1,1,Tienda Online,2,CBA,Córdoba,76,425.06
+2025-02,2025-T1,1,Tienda Online,3,SF,Santa Fe,69,357.42
+2025-02,2025-T1,1,Tienda Online,4,MZA,Mendoza,50,274.24
+2025-02,2025-T1,2,Tiendas Físicas,1,BA,Buenos Aires,4,15.40
+2025-02,2025-T1,2,Tiendas Físicas,2,CBA,Córdoba,3,9.43
+2025-02,2025-T1,2,Tiendas Físicas,3,SF,Santa Fe,2,8.41
+2025-02,2025-T1,2,Tiendas Físicas,4,MZA,Mendoza,2,7.49
+2025-03,2025-T1,1,Tienda Online,1,BA,Buenos Aires,145,506.89
+2025-03,2025-T1,1,Tienda Online,2,CBA,Córdoba,68,368.08
+2025-03,2025-T1,1,Tienda Online,3,SF,Santa Fe,70,357.92
+2025-03,2025-T1,1,Tienda Online,4,MZA,Mendoza,66,339.73
+2025-03,2025-T1,2,Tiendas Físicas,1,BA,Buenos Aires,9,28.34
+2025-03,2025-T1,2,Tiendas Físicas,2,CBA,Córdoba,3,10.75
+2025-03,2025-T1,2,Tiendas Físicas,3,SF,Santa Fe,1,2.75
+2025-03,2025-T1,2,Tiendas Físicas,4,MZA,Mendoza,3,6.85
+2025-04,2025-T2,1,Tienda Online,1,BA,Buenos Aires,136,475.40
+2025-04,2025-T2,1,Tienda Online,2,CBA,Córdoba,72,446.94
+2025-04,2025-T2,1,Tienda Online,3,SF,Santa Fe,80,439.96
+2025-04,2025-T2,1,Tienda Online,4,MZA,Mendoza,35,195.75
+2025-04,2025-T2,2,Tiendas Físicas,1,BA,Buenos Aires,4,12.42
+2025-04,2025-T2,2,Tiendas Físicas,2,CBA,Córdoba,1,3.88
+2025-04,2025-T2,2,Tiendas Físicas,3,SF,Santa Fe,2,7.66
+2025-04,2025-T2,2,Tiendas Físicas,4,MZA,Mendoza,1,2.12
+2025-05,2025-T2,1,Tienda Online,1,BA,Buenos Aires,181,719.37
+2025-05,2025-T2,1,Tienda Online,2,CBA,Córdoba,85,537.45
+2025-05,2025-T2,1,Tienda Online,3,SF,Santa Fe,84,490.82
+2025-05,2025-T2,1,Tienda Online,4,MZA,Mendoza,53,315.97
+2025-05,2025-T2,2,Tiendas Físicas,1,BA,Buenos Aires,5,15.23
+2025-05,2025-T2,2,Tiendas Físicas,2,CBA,Córdoba,5,22.25
+2025-05,2025-T2,2,Tiendas Físicas,4,MZA,Mendoza,2,4.82
+2025-06,2025-T2,1,Tienda Online,1,BA,Buenos Aires,135,447.01
+2025-06,2025-T2,1,Tienda Online,2,CBA,Córdoba,66,336.30
+2025-06,2025-T2,1,Tienda Online,3,SF,Santa Fe,75,372.10
+2025-06,2025-T2,1,Tienda Online,4,MZA,Mendoza,60,290.21
+2025-06,2025-T2,2,Tiendas Físicas,1,BA,Buenos Aires,4,10.29
+2025-06,2025-T2,2,Tiendas Físicas,2,CBA,Córdoba,5,17.32
+2025-06,2025-T2,2,Tiendas Físicas,3,SF,Santa Fe,5,15.89
+2025-07,2025-T3,1,Tienda Online,1,BA,Buenos Aires,122,452.70
+2025-07,2025-T3,1,Tienda Online,2,CBA,Córdoba,51,279.55
+2025-07,2025-T3,1,Tienda Online,3,SF,Santa Fe,64,348.50
+2025-07,2025-T3,1,Tienda Online,4,MZA,Mendoza,41,208.68
+2025-07,2025-T3,2,Tiendas Físicas,1,BA,Buenos Aires,1,2.05
+2025-07,2025-T3,2,Tiendas Físicas,2,CBA,Córdoba,3,10.72
+2025-07,2025-T3,2,Tiendas Físicas,3,SF,Santa Fe,2,7.76
+2025-07,2025-T3,2,Tiendas Físicas,4,MZA,Mendoza,3,9.64
+2025-08,2025-T3,1,Tienda Online,1,BA,Buenos Aires,142,470.13
+2025-08,2025-T3,1,Tienda Online,2,CBA,Córdoba,82,458.75
+2025-08,2025-T3,1,Tienda Online,3,SF,Santa Fe,81,425.57
+2025-08,2025-T3,1,Tienda Online,4,MZA,Mendoza,48,265.04
+2025-08,2025-T3,2,Tiendas Físicas,1,BA,Buenos Aires,4,8.52
+2025-08,2025-T3,2,Tiendas Físicas,2,CBA,Córdoba,1,3.09
+2025-08,2025-T3,2,Tiendas Físicas,3,SF,Santa Fe,4,12.55
+2025-08,2025-T3,2,Tiendas Físicas,4,MZA,Mendoza,3,12.04
+2025-09,2025-T3,1,Tienda Online,1,BA,Buenos Aires,116,382.51
+2025-09,2025-T3,1,Tienda Online,2,CBA,Córdoba,66,365.38
+2025-09,2025-T3,1,Tienda Online,3,SF,Santa Fe,50,253.12
+2025-09,2025-T3,1,Tienda Online,4,MZA,Mendoza,41,221.42
+2025-09,2025-T3,2,Tiendas Físicas,2,CBA,Córdoba,1,1.99
+2025-09,2025-T3,2,Tiendas Físicas,3,SF,Santa Fe,2,4.67

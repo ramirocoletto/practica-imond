@@ -4,6 +4,11 @@ Generado por `run_sql.py` a partir de las tablas de `warehouse.duckdb`.
 
 ```mermaid
 erDiagram
+    dim_address ||--o{ fact_orders : "billing_address_key"
+    dim_address ||--o{ fact_orders : "shipping_address_key"
+    dim_address ||--o{ fact_sales : "shipping_address_key"
+    dim_address ||--o{ fact_shipments : "shipping_address_key"
+    dim_carrier ||--o{ fact_shipments : "carrier_key"
     dim_channel ||--o{ fact_nps : "channel_key"
     dim_channel ||--o{ fact_orders : "channel_key"
     dim_channel ||--o{ fact_payments : "channel_key"
@@ -26,18 +31,38 @@ erDiagram
     dim_date ||--o{ fact_shipments : "shipped_date_key"
     dim_date ||--o{ fact_web_sessions : "date_key"
     dim_device ||--o{ fact_web_sessions : "device_key"
+    dim_nps_category ||--o{ fact_nps : "nps_category_key"
     dim_order_status ||--o{ fact_orders : "status_key"
     dim_order_status ||--o{ fact_sales : "status_key"
     dim_payment_method ||--o{ fact_orders : "payment_method_key"
     dim_payment_method ||--o{ fact_payments : "payment_method_key"
+    dim_payment_status ||--o{ fact_payments : "payment_status_key"
     dim_product ||--o{ fact_sales : "product_key"
     dim_province ||--o{ fact_orders : "province_key"
     dim_province ||--o{ fact_sales : "province_key"
     dim_province ||--o{ fact_shipments : "province_key"
+    dim_shipment_status ||--o{ fact_shipments : "shipment_status_key"
     dim_store ||--o{ fact_orders : "store_key"
     dim_store ||--o{ fact_sales : "store_key"
     dim_store ||--o{ fact_shipments : "store_key"
     dim_traffic_source ||--o{ fact_web_sessions : "source_key"
+    dim_address {
+        INTEGER address_key PK
+        BIGINT address_id
+        VARCHAR line1
+        VARCHAR line2
+        VARCHAR city
+        VARCHAR postal_code
+        VARCHAR country_code
+        VARCHAR province_name
+        VARCHAR province_code
+        VARCHAR address_type
+        TIMESTAMP created_at
+    }
+    dim_carrier {
+        INTEGER carrier_key PK
+        VARCHAR name
+    }
     dim_channel {
         INTEGER channel_key PK
         INTEGER channel_id
@@ -79,6 +104,13 @@ erDiagram
         VARCHAR device_code
         VARCHAR description
     }
+    dim_nps_category {
+        INTEGER nps_category_key PK
+        VARCHAR name
+        SMALLINT min_score
+        SMALLINT max_score
+        INTEGER nps_points
+    }
     dim_order_status {
         INTEGER status_key PK
         VARCHAR status_code
@@ -89,6 +121,12 @@ erDiagram
         INTEGER payment_method_key PK
         VARCHAR method_code
         VARCHAR description
+    }
+    dim_payment_status {
+        INTEGER payment_status_key PK
+        VARCHAR status_code
+        VARCHAR description
+        BOOLEAN is_collected
     }
     dim_product {
         INTEGER product_key PK
@@ -106,6 +144,12 @@ erDiagram
         VARCHAR name
         VARCHAR code
         VARCHAR iso_3166_2
+    }
+    dim_shipment_status {
+        INTEGER shipment_status_key PK
+        VARCHAR status_code
+        VARCHAR description
+        BOOLEAN is_delivered
     }
     dim_store {
         INTEGER store_key PK
@@ -127,8 +171,8 @@ erDiagram
         INTEGER date_key FK
         INTEGER customer_key FK
         INTEGER channel_key FK
+        INTEGER nps_category_key FK
         SMALLINT score
-        VARCHAR nps_category
         INTEGER is_promoter
         INTEGER is_passive
         INTEGER is_detractor
@@ -143,6 +187,8 @@ erDiagram
         INTEGER channel_key FK
         INTEGER store_key FK
         INTEGER province_key FK
+        INTEGER shipping_address_key FK
+        INTEGER billing_address_key FK
         INTEGER status_key FK
         INTEGER payment_method_key FK
         BOOLEAN is_sale
@@ -161,9 +207,9 @@ erDiagram
         INTEGER order_date_key FK
         INTEGER paid_date_key FK
         INTEGER payment_method_key FK
+        INTEGER payment_status_key FK
         INTEGER customer_key FK
         INTEGER channel_key FK
-        VARCHAR payment_status
         VARCHAR transaction_ref
         DECIMAL amount
         INTEGER minutes_to_pay
@@ -177,6 +223,7 @@ erDiagram
         INTEGER channel_key FK
         INTEGER store_key FK
         INTEGER province_key FK
+        INTEGER shipping_address_key FK
         INTEGER status_key FK
         BOOLEAN is_sale
         INTEGER quantity
@@ -196,9 +243,10 @@ erDiagram
         INTEGER channel_key FK
         INTEGER store_key FK
         INTEGER province_key FK
-        VARCHAR carrier
+        INTEGER shipping_address_key FK
+        INTEGER carrier_key FK
+        INTEGER shipment_status_key FK
         VARCHAR tracking_number
-        VARCHAR shipment_status
         BOOLEAN is_delivered
         DECIMAL hours_to_ship
         DECIMAL days_in_transit
@@ -214,5 +262,83 @@ erDiagram
         VARCHAR active_user_id
         BOOLEAN is_logged_in
         INTEGER duration_seconds
+    }
+    mart_calendario_mes {
+        VARCHAR year_month PK
+        DATE month_start
+        INTEGER year
+        INTEGER month
+        VARCHAR year_quarter
+        VARCHAR month_label
+        VARCHAR month_long
+    }
+    mart_entregas_mes {
+        VARCHAR year_month PK
+        VARCHAR year_quarter
+        INTEGER channel_key PK
+        VARCHAR channel_name
+        INTEGER province_key PK
+        VARCHAR province_code
+        VARCHAR province_name
+        INTEGER envios_entregados
+        DECIMAL suma_dias_entrega
+    }
+    mart_entregas_producto_mes {
+        VARCHAR year_month PK
+        VARCHAR year_quarter
+        INTEGER channel_key PK
+        VARCHAR channel_name
+        INTEGER province_key PK
+        VARCHAR province_code
+        VARCHAR province_name
+        INTEGER product_key PK
+        VARCHAR product_name
+        INTEGER envios_entregados
+        DECIMAL suma_dias_entrega
+    }
+    mart_nps_mes {
+        VARCHAR year_month PK
+        VARCHAR year_quarter
+        INTEGER channel_key PK
+        VARCHAR channel_name
+        INTEGER respuestas
+        INTEGER promotores
+        INTEGER pasivos
+        INTEGER detractores
+        INTEGER puntos_nps
+    }
+    mart_usuarios_activos_rango {
+        VARCHAR desde_mes PK
+        VARCHAR hasta_mes PK
+        INTEGER meses
+        INTEGER usuarios_activos
+        INTEGER usuarios_logueados
+        INTEGER sesiones
+    }
+    mart_ventas_mes {
+        VARCHAR year_month PK
+        VARCHAR year_quarter
+        INTEGER channel_key PK
+        VARCHAR channel_name
+        INTEGER province_key PK
+        VARCHAR province_code
+        VARCHAR province_name
+        DECIMAL ventas
+        INTEGER pedidos
+    }
+    mart_ventas_producto_mes {
+        VARCHAR year_month PK
+        VARCHAR year_quarter
+        INTEGER channel_key PK
+        VARCHAR channel_name
+        INTEGER province_key PK
+        VARCHAR province_code
+        VARCHAR province_name
+        INTEGER product_key PK
+        VARCHAR product_name
+        DECIMAL ventas
+        INTEGER pedidos
+        DECIMAL ventas_netas
+        INTEGER unidades
     }
 ```

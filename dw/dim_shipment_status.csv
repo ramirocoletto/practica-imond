@@ -1,0 +1,6 @@
+shipment_status_key,status_code,description,is_delivered
+-1,UNKNOWN,Sin dato,false
+1,CANCELLED,Cancelado (no salió),false
+2,DELIVERED,Entregado,true
+3,READY,En preparación,false
+4,SHIPPED,En viaje,false
