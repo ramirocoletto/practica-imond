@@ -101,7 +101,29 @@ UNION ALL SELECT 'ventas netas',        (SELECT SUM(ventas_netas) FROM mart_vent
 UNION ALL SELECT 'usuarios activos',    (SELECT usuarios_activos FROM mart_usuarios_activos_rango WHERE desde_mes = '2024-01' AND hasta_mes = '2025-09'), (SELECT COUNT(DISTINCT active_user_id) FROM fact_web_sessions)
 UNION ALL SELECT 'respuestas nps',      (SELECT SUM(respuestas) FROM mart_nps_mes),            (SELECT COUNT(*) FROM fact_nps)
 UNION ALL SELECT 'puntos nps',          (SELECT SUM(puntos_nps) FROM mart_nps_mes),            (SELECT SUM(nps_points) FROM fact_nps)
-UNION ALL SELECT 'envíos entregados',   (SELECT SUM(envios_entregados) FROM mart_entregas_mes), (SELECT COUNT(*) FROM fact_shipments WHERE is_delivered);
+UNION ALL SELECT 'envíos entregados',   (SELECT SUM(envios_entregados) FROM mart_entregas_mes), (SELECT COUNT(*) FROM fact_shipments WHERE is_delivered)
+UNION ALL SELECT 'ranking: ventas netas (todos/todas)', (SELECT SUM(ventas_netas) FROM mart_ranking_producto_mes WHERE channel_key = 0 AND province_key = 0), (SELECT SUM(line_total) FROM fact_sales WHERE is_sale);
+
+-- A6. El puesto del mart de ranking coincide con RANK() calculado sobre los hechos,
+--     para todos los meses y todas las combinaciones de canal y provincia
+WITH esperado AS (
+    SELECT d.year_month, COALESCE(c.channel_key, 0) AS channel_key, COALESCE(p.province_key, 0) AS province_key, f.product_key,
+           RANK() OVER (PARTITION BY d.year_month, COALESCE(c.channel_key, 0), COALESCE(p.province_key, 0) ORDER BY SUM(f.line_total) DESC) AS puesto
+    FROM fact_sales AS f
+    JOIN dim_date AS d ON d.date_key = f.date_key
+    CROSS JOIN (SELECT 0 AS k UNION ALL SELECT DISTINCT channel_key  FROM fact_sales) AS cc
+    CROSS JOIN (SELECT 0 AS k UNION ALL SELECT DISTINCT province_key FROM fact_sales) AS pp
+    LEFT JOIN dim_channel  AS c ON c.channel_key  = cc.k AND cc.k <> 0
+    LEFT JOIN dim_province AS p ON p.province_key = pp.k AND pp.k <> 0
+    WHERE f.is_sale
+      AND (cc.k = 0 OR f.channel_key = cc.k)
+      AND (pp.k = 0 OR f.province_key = pp.k)
+    GROUP BY d.year_month, COALESCE(c.channel_key, 0), COALESCE(p.province_key, 0), f.product_key
+)
+SELECT COUNT(*) AS puestos_comparados,
+       COUNT(*) FILTER (WHERE e.puesto <> m.puesto) AS puestos_distintos
+FROM esperado AS e
+JOIN mart_ranking_producto_mes AS m USING (year_month, channel_key, province_key, product_key);
 
 
 -- =====================================================================
