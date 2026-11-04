@@ -144,6 +144,7 @@ details.data .scroll { max-height: 220px; overflow: auto; }
 .rank .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: 0; }
 select.inline { font: 500 12.5px Inter, system-ui, sans-serif; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; }
 
+.note { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary); background: var(--chip); border-radius: 8px; padding: 6px 10px; }
 .goal { display: flex; flex-direction: column; gap: 4px; }
 .goal .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; width: fit-content; }
@@ -231,6 +232,7 @@ footer code { font-size: 11.5px; }
       <div class="card">
         <h2>Ventas por provincia</h2>
         <p class="sub">Millones de pesos y participación · provincia de la dirección de envío</p>
+        <p class="note" id="n-prov" hidden></p>
         <div class="chart tall"><canvas id="c-prov" aria-label="Ventas por provincia"></canvas></div>
         <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-prov"></div></details>
       </div>
@@ -251,6 +253,7 @@ footer code { font-size: 11.5px; }
           <select class="inline" id="f-rank-month"></select>
         </div>
         <table class="rank" id="t-rank"></table>
+        <p class="note" id="n-rank" hidden></p>
       </div>
     </section>
 
@@ -273,12 +276,13 @@ footer code { font-size: 11.5px; }
     <section class="grid2">
       <div class="card">
         <h2>Meta: crecer 15 % las ventas en Córdoba</h2>
-        <p class="sub">Último trimestre con datos vs. el mismo trimestre del año anterior · respeta canal y producto</p>
+        <p class="sub" id="s-cba">Trimestre del mes “Hasta” vs. los mismos meses del año anterior</p>
         <div class="goal" id="goal-cba"></div>
       </div>
       <div class="card">
         <h2>Meta: reducir tiempos de entrega en Mendoza</h2>
         <p class="sub">Días promedio del pedido a la entrega, por trimestre · envíos por correo entregados</p>
+        <p class="note" id="n-ship" hidden></p>
         <div class="legend" id="lg-ship"></div>
         <div class="chart short"><canvas id="c-ship" aria-label="Días de entrega por provincia"></canvas></div>
         <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-ship"></div></details>
@@ -298,28 +302,41 @@ footer code { font-size: 11.5px; }
     </section>
 
     <footer>
-      <b>Fuentes:</b> data warehouse de EcoBottle AR generado con <code>run_sql.py</code> —
-      <code>dw/fact_orders.csv</code>, <code>dw/fact_sales.csv</code>, <code>dw/fact_web_sessions.csv</code>,
-      <code>dw/fact_nps.csv</code>, <code>dw/fact_shipments.csv</code> y dimensiones <code>dw/dim_*.csv</code>.
+      <b>Fuentes:</b> marts del data warehouse de EcoBottle AR generados con <code>run_sql.py</code> (<code>sql/03_marts.sql</code>) —
+      <code>dw/mart_ventas_mes.csv</code>, <code>dw/mart_ventas_producto_mes.csv</code>, <code>dw/mart_usuarios_activos_rango.csv</code>,
+      <code>dw/mart_nps_mes.csv</code>, <code>dw/mart_entregas_mes.csv</code>, <code>dw/mart_entregas_producto_mes.csv</code> y <code>dw/mart_calendario_mes.csv</code>;
+      opciones de los filtros: <code>dw/dim_channel.csv</code>, <code>dw/dim_province.csv</code>, <code>dw/dim_product.csv</code>.
+      El tablero solo filtra filas, suma columnas y hace la división final de los cocientes. El filtro de fecha es mensual.
       Los filtros que no aplican a un indicador se aclaran en su tarjeta.
     </footer>
   </div>
 </main>
 
 <script>
+// =====================================================================
+// Tablero EcoBottle AR
+// ---------------------------------------------------------------------
+// Fuente: SOLO los marts de dw/ (sql/03_marts.sql) y, para llenar los
+// filtros, tres dimensiones chicas. Todos los cálculos (joins, conteos
+// distintos, agregaciones por mes) los hace el ETL en SQL.
+// Este código únicamente:
+//   1. FILTRA filas de un mart (por mes, canal, provincia, producto),
+//   2. SUMA columnas aditivas de esas filas,
+//   3. hace la DIVISIÓN final de un cociente (ticket, NPS, días promedio,
+//      participación %, variación %),
+// igual que una medida de Power BI / Looker Studio. Ordenar para el Top N
+// es una operación de visualización.
+// =====================================================================
 (() => {
   'use strict';
   const DW = '../dw/';
-  const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const nf0 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
   const nf1 = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const nf2 = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const ymLabel = (ym) => `${MONTHS_ES[(ym % 100) - 1]} ${String(Math.floor(ym / 100)).slice(2)}`;
-  const ymLong  = (ym) => `${MONTHS_ES[(ym % 100) - 1]} ${Math.floor(ym / 100)}`;
-  const quarterOf = (ym) => `${Math.floor(ym / 100)}-T${Math.ceil((ym % 100) / 3)}`;
   const $ = (id) => document.getElementById(id);
+  const sum = (rows, col) => rows.reduce((acc, r) => acc + r[col], 0);
 
   function load(name) {
     return new Promise((resolve, reject) => {
@@ -330,23 +347,25 @@ footer code { font-size: 11.5px; }
     });
   }
 
-  const S = { months: [], channels: [], provinces: [], products: [] };
-  let D = {};
+  const S = { months: [], cal: new Map(), channels: [], provinces: [], products: [] };
+  const M = {};
   const charts = {};
   const F = { from: null, to: null, ch: 'all', prov: 'all', prod: 'all', topn: 2, rankMonth: null };
 
-  Promise.all(['dim_channel','dim_province','dim_product','fact_orders','fact_sales',
-               'fact_web_sessions','fact_nps','fact_shipments'].map(load))
-    .then(([ch, prov, prod, orders, sales, sessions, nps, ships]) => {
-      S.channels = ch; S.provinces = prov; S.products = prod;
-      const ym = (dk) => Math.floor(dk / 100);
-      D.orders = orders.filter(o => o.is_sale === true).map(o => ({ ym: ym(o.date_key), ch: o.channel_key, prov: o.province_key, total: +o.total_amount }));
-      D.lines = sales.filter(s => s.is_sale === true).map(s => ({ ym: ym(s.date_key), ch: s.channel_key, prov: s.province_key, prod: s.product_key, order: s.order_id, line: +s.line_total, alloc: +s.total_amount_allocated, qty: s.quantity }));
-      D.sessions = sessions.map(w => ({ ym: ym(w.date_key), ch: w.channel_key, uid: w.active_user_id }));
-      D.nps = nps.map(n => ({ ym: ym(n.date_key), ch: n.channel_key, pts: n.nps_points }));
-      D.ships = ships.filter(s => s.is_delivered === true).map(s => ({ ym: ym(s.order_date_key), ch: s.channel_key, prov: s.province_key, days: +s.days_to_deliver }));
-      const set = new Set(D.orders.map(o => o.ym));
-      S.months = [...set].sort((a, b) => a - b);
+  Promise.all([
+    'mart_calendario_mes', 'mart_ventas_mes', 'mart_ventas_producto_mes', 'mart_usuarios_activos_rango',
+    'mart_nps_mes', 'mart_entregas_mes', 'mart_entregas_producto_mes',
+    'dim_channel', 'dim_province', 'dim_product',
+  ].map(load))
+    .then(([cal, ventas, vprod, usuarios, nps, ent, entp, ch, prov, prod]) => {
+      cal.sort((a, b) => (a.year_month < b.year_month ? -1 : 1));
+      S.months = cal.map(c => c.year_month);
+      cal.forEach(c => S.cal.set(c.year_month, c));
+      S.channels = ch.filter(c => c.channel_key > 0);
+      S.provinces = prov.filter(p => p.province_key > 0);
+      S.products = prod.filter(p => p.product_key > 0);
+      M.ventas = ventas; M.vprod = vprod; M.nps = nps; M.ent = ent; M.entp = entp;
+      M.usuarios = new Map(usuarios.map(u => [u.desde_mes + '|' + u.hasta_mes, u]));
       initFilters();
       $('loading').remove();
       $('kpis').hidden = false; $('content').hidden = false;
@@ -358,20 +377,22 @@ footer code { font-size: 11.5px; }
     });
 
   // ------------------------------------------------------------------ filtros
+  const label = (ym) => S.cal.get(ym).month_label;
+  const long = (ym) => S.cal.get(ym).month_long;
   function opt(sel, value, text) { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
   function initFilters() {
-    for (const m of S.months) { opt($('f-from'), m, ymLong(m)); opt($('f-to'), m, ymLong(m)); }
+    for (const m of S.months) { opt($('f-from'), m, long(m)); opt($('f-to'), m, long(m)); }
     opt($('f-ch'), 'all', 'Todos'); S.channels.forEach(c => opt($('f-ch'), c.channel_key, c.name));
     opt($('f-prov'), 'all', 'Todas'); S.provinces.forEach(p => opt($('f-prov'), p.province_key, p.name));
     opt($('f-prod'), 'all', 'Todos'); S.products.forEach(p => opt($('f-prod'), p.product_key, p.name));
     resetFilters(false);
-    $('f-from').onchange = () => { F.from = +$('f-from').value; if (F.from > F.to) { F.to = F.from; $('f-to').value = F.to; } F.rankMonth = null; markPreset(); render(); };
-    $('f-to').onchange   = () => { F.to = +$('f-to').value; if (F.to < F.from) { F.from = F.to; $('f-from').value = F.from; } F.rankMonth = null; markPreset(); render(); };
+    $('f-from').onchange = () => { F.from = $('f-from').value; if (F.from > F.to) { F.to = F.from; $('f-to').value = F.to; } F.rankMonth = null; markPreset(); render(); };
+    $('f-to').onchange   = () => { F.to = $('f-to').value; if (F.to < F.from) { F.from = F.to; $('f-from').value = F.from; } F.rankMonth = null; markPreset(); render(); };
     $('f-ch').onchange   = () => { F.ch = val($('f-ch')); render(); };
     $('f-prov').onchange = () => { F.prov = val($('f-prov')); render(); };
     $('f-prod').onchange = () => { F.prod = val($('f-prod')); render(); };
     $('f-topn').onchange = () => { F.topn = +$('f-topn').value; render(); };
-    $('f-rank-month').onchange = () => { F.rankMonth = +$('f-rank-month').value; renderRankTable(); };
+    $('f-rank-month').onchange = () => { F.rankMonth = $('f-rank-month').value; renderRankTable(); };
     $('f-reset').onclick = () => resetFilters(true);
     document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
       const p = b.dataset.preset, last = S.months.length - 1;
@@ -397,44 +418,43 @@ footer code { font-size: 11.5px; }
       b.classList.toggle('on', isLast && (p === 'all' ? n === S.months.length : n === +p));
     });
   }
-  const inRange = (ym, a, b) => ym >= a && ym <= b;
-  const okCh = (c) => F.ch === 'all' || c === F.ch;
-  const okProv = (p) => F.prov === 'all' || p === F.prov;
-  const okProd = (p) => F.prod === 'all' || p === F.prod;
-  const monthsIn = (a, b) => S.months.filter(m => inRange(m, a, b));
+  const monthsIn = (a, b) => S.months.filter(m => m >= a && m <= b);
   function prevRange() {
     const i = S.months.indexOf(F.from), j = S.months.indexOf(F.to), n = j - i + 1;
     if (i - n < 0) return null;
     return [S.months[i - n], S.months[i - 1]];
   }
   const onlineKey = () => (S.channels.find(c => c.code === 'ONLINE') || {}).channel_key;
+  const prodName = () => (S.products.find(p => p.product_key === F.prod) || {}).name;
+  const provName = (k) => (S.provinces.find(p => p.province_key === k) || {}).name;
 
-  // ------------------------------------------------------------------ métricas
-  // Ventas y ticket: sin filtro de producto se usa fact_orders (SUM(total_amount) / COUNT(*)).
-  // Con filtro de producto se usa fact_sales.total_amount_allocated (el total del pedido
-  // repartido entre sus líneas) y se cuentan los pedidos distintos que tienen ese producto.
-  function salesAgg(a, b, opts = {}) {
-    const useProv = opts.ignoreProv ? () => true : okProv;
-    if (F.prod === 'all') {
-      let s = 0, n = 0;
-      for (const o of D.orders) if (inRange(o.ym, a, b) && okCh(o.ch) && useProv(o.prov)) { s += o.total; n++; }
-      return { sales: s, orders: n };
-    }
-    let s = 0; const ids = new Set();
-    for (const l of D.lines) if (inRange(l.ym, a, b) && okCh(l.ch) && useProv(l.prov) && okProd(l.prod)) { s += l.alloc; ids.add(l.order); }
-    return { sales: s, orders: ids.size };
+  // ------------------------------------------------------------------ filtros sobre los marts
+  // where(): devuelve las filas del mart que pasan los filtros elegidos.
+  // Cada clave del objeto `skip` desactiva ese filtro para un visual puntual.
+  function where(rows, a, b, skip = {}) {
+    return rows.filter(r =>
+      r.year_month >= a && r.year_month <= b &&
+      (skip.ch || F.ch === 'all' || r.channel_key === F.ch) &&
+      (skip.prov || F.prov === 'all' || r.province_key === F.prov) &&
+      (skip.prod || F.prod === 'all' || r.product_key === F.prod));
+  }
+  // Ventas: sin producto elegido -> mart_ventas_mes; con producto -> mart_ventas_producto_mes
+  const ventasMart = () => (F.prod === 'all' ? M.ventas : M.vprod);
+  function ventas(a, b, skip = {}, provKey) {
+    let rows = where(ventasMart(), a, b, provKey ? { ...skip, prov: true } : skip);
+    if (provKey) rows = rows.filter(r => r.province_key === provKey);
+    return { ventas: sum(rows, 'ventas'), pedidos: sum(rows, 'pedidos') };
   }
   const usersApply = () => F.ch === 'all' || F.ch === onlineKey();
-  function usersAgg(a, b) {
+  function usuarios(a, b) {
     if (!usersApply()) return null;
-    const u = new Set();
-    for (const w of D.sessions) if (inRange(w.ym, a, b)) u.add(w.uid);
-    return u.size;
+    const r = M.usuarios.get(a + '|' + b);
+    return r ? r.usuarios_activos : null;
   }
-  function npsAgg(a, b, ch = F.ch) {
-    let s = 0, n = 0;
-    for (const r of D.nps) if (inRange(r.ym, a, b) && (ch === 'all' || r.ch === ch)) { s += r.pts; n++; }
-    return n ? s / n : null;
+  function nps(a, b, ch) {
+    const rows = M.nps.filter(r => r.year_month >= a && r.year_month <= b && (ch === 'all' || r.channel_key === ch));
+    const resp = sum(rows, 'respuestas');
+    return resp ? sum(rows, 'puntos_nps') / resp : null;
   }
 
   // ------------------------------------------------------------------ render
@@ -463,19 +483,20 @@ footer code { font-size: 11.5px; }
     el.textContent = `${arrow} ${txt} vs. período anterior`;
     el.title = 'Período anterior: los mismos meses inmediatamente antes del rango elegido';
   }
+  function note(id, text) { const el = $(id); el.hidden = !text; el.textContent = text || ''; }
 
   function renderKpis() {
-    const cur = salesAgg(F.from, F.to);
+    const cur = ventas(F.from, F.to);
     const pr = prevRange();
-    const prv = pr ? salesAgg(pr[0], pr[1]) : null;
-    $('k-sales').textContent = `$${nf1.format(cur.sales / 1e6)} M`;
-    delta($('d-sales'), cur.sales, prv && prv.sales);
-    const t = cur.orders ? cur.sales / cur.orders : null, tp = prv && prv.orders ? prv.sales / prv.orders : null;
+    const prv = pr ? ventas(pr[0], pr[1]) : null;
+    $('k-sales').textContent = `$${nf1.format(cur.ventas / 1e6)} M`;
+    delta($('d-sales'), cur.ventas, prv && prv.ventas);
+    const t = cur.pedidos ? cur.ventas / cur.pedidos : null, tp = prv && prv.pedidos ? prv.ventas / prv.pedidos : null;
     $('k-ticket').textContent = t == null ? '–' : `$${nf1.format(t / 1e3)} K`;
     delta($('d-ticket'), t, tp);
 
-    const u = usersAgg(F.from, F.to);
-    const up = pr ? usersAgg(pr[0], pr[1]) : null;
+    const u = usuarios(F.from, F.to);
+    const up = pr ? usuarios(pr[0], pr[1]) : null;
     $('k-users').textContent = u == null ? 'No aplica' : `${nf1.format(u / 1e3)} K`;
     delta($('d-users'), u, up);
     const uNotes = [];
@@ -483,7 +504,7 @@ footer code { font-size: 11.5px; }
     else { if (F.prov !== 'all') uNotes.push('no se filtra por provincia'); if (F.prod !== 'all') uNotes.push('no se filtra por producto'); }
     $('n-users').textContent = uNotes.length ? (usersApply() ? 'Visitantes únicos · ' : '') + uNotes.join(' y ') : 'Visitantes únicos de la web';
 
-    const n = npsAgg(F.from, F.to), np = pr ? npsAgg(pr[0], pr[1]) : null;
+    const n = nps(F.from, F.to, F.ch), np = pr ? nps(pr[0], pr[1], F.ch) : null;
     $('k-nps').textContent = n == null ? '–' : `${n > 0 ? '+' : ''}${nf1.format(n)} pts`;
     delta($('d-nps'), n, np, 'pts');
     $('n-nps').textContent = (F.prov !== 'all' || F.prod !== 'all')
@@ -492,8 +513,8 @@ footer code { font-size: 11.5px; }
   }
 
   // Opciones comunes de Chart.js, leídas de los tokens del tema
-  function baseOptions(yTitleFmt, extra = {}) {
-    const text2 = css('--text-secondary'), grid = css('--grid'), muted = css('--text-muted');
+  function baseOptions(fmt, extra = {}) {
+    const grid = css('--grid'), muted = css('--text-muted');
     return Object.assign({
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: 'index', intersect: false },
@@ -503,17 +524,17 @@ footer code { font-size: 11.5px; }
           backgroundColor: css('--surface-1'), titleColor: css('--text-secondary'), bodyColor: css('--text-primary'),
           borderColor: css('--border'), borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
           bodyFont: { weight: '600' },
-          callbacks: { label: (c) => ` ${yTitleFmt(c.parsed.y ?? c.parsed.x)}  ${c.dataset.label}` },
+          callbacks: { label: (c) => ` ${fmt(c.parsed.y)}  ${c.dataset.label}` },
         },
       },
       scales: {
         x: { grid: { display: false }, ticks: { color: muted, maxRotation: 0, autoSkipPadding: 10, font: { size: 11 } }, border: { color: grid } },
-        y: { grid: { color: grid }, border: { display: false }, ticks: { color: muted, font: { size: 11 }, callback: (v) => yTitleFmt(v) } },
+        y: { grid: { color: grid }, border: { display: false }, ticks: { color: muted, font: { size: 11 }, callback: (v) => fmt(v) } },
       },
     }, extra);
   }
   function upsert(id, config) {
-    if (charts[id]) { charts[id].destroy(); }
+    if (charts[id]) charts[id].destroy();
     charts[id] = new Chart($(id), config);
   }
   function legend(id, items, kind = 'box') {
@@ -526,69 +547,60 @@ footer code { font-size: 11.5px; }
   }
   function table(id, headers, rows) {
     const el = $(id); el.textContent = '';
-    const t = document.createElement('table'); const thead = t.createTHead(); const hr = thead.insertRow();
+    const t = document.createElement('table'); const hr = t.createTHead().insertRow();
     headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
     const tb = t.createTBody();
     rows.forEach(r => { const tr = tb.insertRow(); r.forEach(c => { tr.insertCell().textContent = c; }); });
     el.appendChild(t);
   }
-  const line = (label, data, color, extra = {}) => Object.assign({
-    label, data, borderColor: color, backgroundColor: color, borderWidth: 2, cubicInterpolationMode: 'monotone',
+  const line = (lbl, data, color, extra = {}) => Object.assign({
+    label: lbl, data, borderColor: color, backgroundColor: color, borderWidth: 2, cubicInterpolationMode: 'monotone',
     pointRadius: 0, pointHoverRadius: 5, pointHoverBorderWidth: 2, pointHoverBorderColor: css('--surface-1'), spanGaps: true,
   }, extra);
+  const chColor = (key) => css(S.channels.findIndex(c => c.channel_key === key) === 0 ? '--series-1' : '--series-2');
+  const prodColor = (key) => css(S.products.findIndex(p => p.product_key === key) === 0 ? '--series-1' : '--series-2');
 
   function renderSalesSeries() {
     const ms = monthsIn(F.from, F.to);
-    const byCh = F.ch === 'all';
-    const series = byCh ? S.channels.map((c, i) => ({ c, color: css(i === 0 ? '--series-1' : '--series-2') })) : null;
-    const total = ms.map(m => salesAgg(m, m).sales / 1e6);
-    let datasets;
-    if (byCh) {
-      const keep = F.ch; datasets = series.map(({ c, color }) => {
-        F.ch = c.channel_key; const d = ms.map(m => salesAgg(m, m).sales / 1e6); F.ch = keep;
-        return line(c.name, d, color);
-      });
-      legend('lg-sales', series.map(s => ({ label: s.c.name, color: s.color })), 'line');
-    } else {
-      datasets = [line('Ventas', total, css('--series-1'))];
-      $('lg-sales').textContent = '';
-    }
-    upsert('c-sales', { type: 'line', data: { labels: ms.map(ymLabel), datasets }, options: baseOptions(v => `$${nf1.format(v)} M`) });
-    const headers = byCh ? ['Mes', ...series.map(s => s.c.name), 'Total ($M)'] : ['Mes', 'Ventas ($M)'];
-    table('t-sales', headers, ms.map((m, i) => byCh ? [ymLong(m), ...datasets.map(d => nf2.format(d.data[i])), nf2.format(total[i])] : [ymLong(m), nf2.format(total[i])]));
+    const chs = F.ch === 'all' ? S.channels : S.channels.filter(c => c.channel_key === F.ch);
+    const ds = chs.map(c => line(c.name, ms.map(m => {
+      const rows = where(ventasMart(), m, m, { ch: true }).filter(r => r.channel_key === c.channel_key);
+      return sum(rows, 'ventas') / 1e6;
+    }), chColor(c.channel_key)));
+    upsert('c-sales', { type: 'line', data: { labels: ms.map(label), datasets: ds }, options: baseOptions(v => `$${nf1.format(v)} M`) });
+    legend('lg-sales', ds.map(d => ({ label: d.label, color: d.borderColor })), 'line');
+    const total = ms.map((m, i) => ds.reduce((acc, d) => acc + d.data[i], 0));
+    table('t-sales', ['Mes', ...ds.map(d => d.label + ' ($M)'), 'Total ($M)'], ms.map((m, i) => [long(m), ...ds.map(d => nf2.format(d.data[i])), nf2.format(total[i])]));
   }
 
   function renderUsersSeries() {
     const ms = monthsIn(F.from, F.to);
     const ok = usersApply();
-    const data = ms.map(m => { const u = ok ? usersAgg(m, m) : null; return u == null ? null : u / 1e3; });
-    $('s-users').textContent = ok ? 'Miles de usuarios únicos (cliente logueado o sesión anónima)' : 'No aplica: las sesiones web pertenecen al canal online';
-    upsert('c-users', { type: 'line', data: { labels: ms.map(ymLabel), datasets: [line('Usuarios activos', data, css('--series-1'))] }, options: baseOptions(v => `${nf1.format(v)} K`) });
-    table('t-users', ['Mes', 'Usuarios activos'], ms.map((m, i) => [ymLong(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
+    const data = ms.map(m => { const u = ok ? usuarios(m, m) : null; return u == null ? null : u / 1e3; });
+    $('s-users').textContent = ok ? 'Miles de usuarios únicos por mes (cliente logueado o sesión anónima)' : 'No aplica: las sesiones web pertenecen al canal online';
+    upsert('c-users', { type: 'line', data: { labels: ms.map(label), datasets: [line('Usuarios activos', data, css('--series-1'))] }, options: baseOptions(v => `${nf1.format(v)} K`) });
+    table('t-users', ['Mes', 'Usuarios activos'], ms.map((m, i) => [long(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
   }
 
   function renderProvinces() {
-    const rows = S.provinces.map(p => {
-      const keep = F.prov; F.prov = p.province_key; const v = salesAgg(F.from, F.to).sales; F.prov = keep;
-      return { p, v };
-    }).sort((a, b) => b.v - a.v);
+    // Este visual compara provincias: el filtro de provincia resalta, no oculta.
+    const rows = S.provinces.map(p => ({ p, v: ventas(F.from, F.to, {}, p.province_key).ventas })).sort((a, b) => b.v - a.v);
     const tot = rows.reduce((s, r) => s + r.v, 0) || 1;
+    const hl = (r) => F.prov === 'all' || F.prov === r.p.province_key;
     const c1 = css('--series-1'), mut = css('--muted-mark');
-    const colors = rows.map(r => F.prov === 'all' || F.prov === r.p.province_key ? c1 : mut);
+    note('n-prov', F.prov === 'all' ? '' : `${provName(F.prov)} aparece resaltada. Este gráfico no oculta las otras provincias para que se puedan comparar; la participación % es sobre el total de las cuatro.`);
     upsert('c-prov', {
       type: 'bar',
-      data: { labels: rows.map(r => r.p.name), datasets: [{ label: 'Ventas', data: rows.map(r => r.v / 1e6), backgroundColor: colors, borderRadius: 4, borderSkipped: 'start', barPercentage: 0.7, categoryPercentage: 0.85, maxBarThickness: 36 }] },
-      options: Object.assign(baseOptions(v => `$${nf1.format(v)} M`, { indexAxis: 'y', interaction: { mode: 'nearest', intersect: true, axis: 'y' } }), {}),
+      data: { labels: rows.map(r => r.p.name), datasets: [{ label: 'Ventas', data: rows.map(r => r.v / 1e6), backgroundColor: rows.map(r => hl(r) ? c1 : mut), borderRadius: 4, borderSkipped: 'start', barPercentage: 0.7, categoryPercentage: 0.85, maxBarThickness: 36 }] },
+      options: baseOptions(v => `$${nf1.format(v)} M`, { indexAxis: 'y', interaction: { mode: 'nearest', intersect: true, axis: 'y' } }),
       plugins: [{
         id: 'pct', afterDatasetsDraw(chart) {
           const { ctx } = chart; const meta = chart.getDatasetMeta(0);
-          ctx.save(); ctx.font = '600 12px Inter, system-ui, sans-serif'; ctx.fillStyle = css('--text-primary'); ctx.textBaseline = 'middle';
+          ctx.save(); ctx.font = '600 12px Inter, system-ui, sans-serif'; ctx.textBaseline = 'middle';
           meta.data.forEach((bar, i) => {
             const txt = `${nf1.format(rows[i].v / tot * 100)} %`;
-            const w = ctx.measureText(txt).width;
-            const inside = bar.x - chart.chartArea.left > w + 16;
-            const hl = F.prov === 'all' || F.prov === rows[i].p.province_key;
-            ctx.fillStyle = inside && hl ? '#ffffff' : css('--text-primary');
+            const inside = bar.x - chart.chartArea.left > ctx.measureText(txt).width + 16;
+            ctx.fillStyle = inside && hl(rows[i]) ? '#ffffff' : css('--text-primary');
             ctx.textAlign = inside ? 'right' : 'left';
             ctx.fillText(txt, inside ? bar.x - 8 : bar.x + 6, bar.y);
           });
@@ -605,48 +617,51 @@ footer code { font-size: 11.5px; }
     table('t-prov', ['Provincia', 'Ventas ($M)', 'Participación'], rows.map(r => [r.p.name, nf2.format(r.v / 1e6), `${nf1.format(r.v / tot * 100)} %`]));
   }
 
-  // Ranking: SUM(line_total) por producto y mes (respeta fecha, canal y provincia)
+  // Ranking: SUM(ventas_netas) = SUM(line_total) por producto y mes, de mart_ventas_producto_mes.
+  // Respeta fecha, canal y provincia. El ranking compara productos entre sí, así que siempre
+  // se ordenan todos; con un producto elegido se muestra solo ese, con su puesto real.
   function productMonth() {
-    const ms = monthsIn(F.from, F.to); const idx = new Map(ms.map((m, i) => [m, i]));
-    const by = new Map(S.products.map(p => [p.product_key, { p, net: ms.map(() => 0), qty: ms.map(() => 0) }]));
-    for (const l of D.lines) {
-      if (!idx.has(l.ym) || !okCh(l.ch) || !okProv(l.prov)) continue;
-      const r = by.get(l.prod); const i = idx.get(l.ym); r.net[i] += l.line; r.qty[i] += l.qty;
-    }
-    return { ms, rows: [...by.values()] };
+    const ms = monthsIn(F.from, F.to);
+    const rows = where(M.vprod, F.from, F.to, { prod: true });
+    return { ms, data: S.products.map(p => {
+      const pr = rows.filter(r => r.product_key === p.product_key);
+      return { p,
+        netas: ms.map(m => sum(pr.filter(r => r.year_month === m), 'ventas_netas')),
+        unid: ms.map(m => sum(pr.filter(r => r.year_month === m), 'unidades')) };
+    }) };
   }
-  const prodColor = (key) => css(S.products.findIndex(p => p.product_key === key) === 0 ? '--series-1' : '--series-2');
   function renderRanking() {
-    const { ms, rows } = productMonth();
-    const total = (r) => r.net.reduce((a, b) => a + b, 0);
-    const top = [...rows].sort((a, b) => total(b) - total(a)).slice(0, F.topn);
-    const shown = top.filter(r => okProd(r.p.product_key) || F.prod === 'all');
-    const list = shown.length ? shown : top;
+    const { ms, data } = productMonth();
+    const tot = (d) => d.netas.reduce((a, b) => a + b, 0);
+    let list = [...data].sort((a, b) => tot(b) - tot(a)).slice(0, F.topn);
+    if (F.prod !== 'all') list = data.filter(d => d.p.product_key === F.prod);
     upsert('c-rank', {
       type: 'bar',
-      data: { labels: ms.map(ymLabel), datasets: list.map(r => ({ label: r.p.name, data: r.net.map(v => v / 1e6), backgroundColor: prodColor(r.p.product_key), borderRadius: 4, borderSkipped: 'start', barPercentage: 0.8, categoryPercentage: 0.75 })) },
+      data: { labels: ms.map(label), datasets: list.map(d => ({ label: d.p.name, data: d.netas.map(v => v / 1e6), backgroundColor: prodColor(d.p.product_key), borderRadius: 4, borderSkipped: 'start', barPercentage: 0.8, categoryPercentage: 0.75 })) },
       options: baseOptions(v => `$${nf1.format(v)} M`),
     });
-    legend('lg-rank', list.map(r => ({ label: r.p.name, color: prodColor(r.p.product_key) })));
+    legend('lg-rank', list.map(d => ({ label: d.p.name, color: prodColor(d.p.product_key) })));
     const sel = $('f-rank-month'); sel.textContent = '';
-    [...ms].reverse().forEach(m => opt(sel, m, ymLong(m)));
+    [...ms].reverse().forEach(m => opt(sel, m, long(m)));
     if (!F.rankMonth || !ms.includes(F.rankMonth)) F.rankMonth = ms[ms.length - 1];
     sel.value = F.rankMonth;
     renderRankTable();
   }
   function renderRankTable() {
-    const { ms, rows } = productMonth();
+    const { ms, data } = productMonth();
     const i = ms.indexOf(F.rankMonth);
-    const ranked = rows.map(r => ({ r, net: r.net[i], qty: r.qty[i], prev: i > 0 ? r.net[i - 1] : null }))
-      .sort((a, b) => b.net - a.net).slice(0, F.topn);
+    let ranked = data.map(d => ({ d, net: d.netas[i], qty: d.unid[i], prev: i > 0 ? d.netas[i - 1] : null }))
+      .sort((a, b) => b.net - a.net).map((x, k) => ({ ...x, pos: k + 1 }));
+    ranked = F.prod === 'all' ? ranked.slice(0, F.topn) : ranked.filter(x => x.d.p.product_key === F.prod);
+    note('n-rank', F.prod === 'all' ? '' : `Filtro de producto: se muestra solo ${prodName()} con su puesto dentro del ranking de todos los productos del mes.`);
     const t = $('t-rank'); t.textContent = '';
     const h = t.createTHead().insertRow();
     ['#', 'Producto', 'Unidades', 'Ventas netas', 'vs. mes ant.'].forEach(x => { const th = document.createElement('th'); th.textContent = x; h.appendChild(th); });
     const tb = t.createTBody();
-    ranked.forEach((x, k) => {
+    ranked.forEach(x => {
       const tr = tb.insertRow();
-      const c0 = tr.insertCell(); c0.className = 'pos'; c0.textContent = k + 1;
-      const c1 = tr.insertCell(); const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = prodColor(x.r.p.product_key); c1.appendChild(sw); c1.appendChild(document.createTextNode(x.r.p.name));
+      const c0 = tr.insertCell(); c0.className = 'pos'; c0.textContent = x.pos;
+      const c1 = tr.insertCell(); const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = prodColor(x.d.p.product_key); c1.appendChild(sw); c1.appendChild(document.createTextNode(x.d.p.name));
       tr.insertCell().textContent = nf0.format(x.qty);
       tr.insertCell().textContent = `$${nf2.format(x.net / 1e6)} M`;
       const c4 = tr.insertCell();
@@ -658,67 +673,68 @@ footer code { font-size: 11.5px; }
   function renderNps() {
     const ms = monthsIn(F.from, F.to);
     const chs = F.ch === 'all' ? S.channels : S.channels.filter(c => c.channel_key === F.ch);
-    const ds = chs.map(c => {
-      const color = css(S.channels.indexOf(c) === 0 ? '--series-1' : '--series-2');
-      return line(c.name, ms.map(m => npsAgg(m, m, c.channel_key)), color);
-    });
+    const ds = chs.map(c => line(c.name, ms.map(m => nps(m, m, c.channel_key)), chColor(c.channel_key)));
     const opts = baseOptions(v => `${v > 0 ? '+' : ''}${nf0.format(v)}`);
     opts.scales.y.suggestedMin = -40; opts.scales.y.suggestedMax = 60;
     opts.scales.y.grid = { color: (c) => c.tick && c.tick.value === 0 ? css('--text-muted') : css('--grid') };
     opts.plugins.tooltip.callbacks.label = (c) => c.parsed.y == null ? ` sin respuestas  ${c.dataset.label}` : ` ${c.parsed.y > 0 ? '+' : ''}${nf1.format(c.parsed.y)} pts  ${c.dataset.label}`;
-    upsert('c-nps', { type: 'line', data: { labels: ms.map(ymLabel), datasets: ds }, options: opts });
+    upsert('c-nps', { type: 'line', data: { labels: ms.map(label), datasets: ds }, options: opts });
     legend('lg-nps', ds.map(d => ({ label: d.label, color: d.borderColor })), 'line');
-    table('t-nps', ['Mes', ...ds.map(d => d.label)], ms.map((m, i) => [ymLong(m), ...ds.map(d => d.data[i] == null ? '–' : nf1.format(d.data[i]))]));
+    table('t-nps', ['Mes', ...ds.map(d => d.label)], ms.map((m, i) => [long(m), ...ds.map(d => d.data[i] == null ? '–' : nf1.format(d.data[i]))]));
   }
 
   function renderTicket() {
     const ms = monthsIn(F.from, F.to);
-    const data = ms.map(m => { const a = salesAgg(m, m); return a.orders ? a.sales / a.orders / 1e3 : null; });
-    const opts = baseOptions(v => `$${nf1.format(v)} K`);
-    upsert('c-ticket', { type: 'line', data: { labels: ms.map(ymLabel), datasets: [line('Ticket promedio', data, css('--series-1'))] }, options: opts });
-    table('t-ticket', ['Mes', 'Ticket promedio ($)'], ms.map((m, i) => [ymLong(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
+    const data = ms.map(m => { const a = ventas(m, m); return a.pedidos ? a.ventas / a.pedidos / 1e3 : null; });
+    upsert('c-ticket', { type: 'line', data: { labels: ms.map(label), datasets: [line('Ticket promedio', data, css('--series-1'))] }, options: baseOptions(v => `$${nf1.format(v)} K`) });
+    table('t-ticket', ['Mes', 'Ticket promedio ($)'], ms.map((m, i) => [long(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
   }
 
+  // Meta Córdoba: trimestre del mes "Hasta" (hasta ese mes inclusive) contra los mismos meses
+  // del año anterior. Respeta fecha, canal y producto; la provincia es siempre Córdoba.
   function renderGoalCba() {
     const cba = S.provinces.find(p => p.code === 'CBA');
-    const last = S.months[S.months.length - 1];
-    const q = quarterOf(last);
-    const qMonths = S.months.filter(m => quarterOf(m) === q);
-    const prevYear = qMonths.map(m => m - 100);
-    const keep = F.prov; F.prov = cba.province_key;
-    const cur = salesAgg(qMonths[0], qMonths[qMonths.length - 1]).sales;
-    const ly = salesAgg(prevYear[0], prevYear[prevYear.length - 1]).sales;
-    const pqM = S.months.filter(m => quarterOf(m) === quarterOf(qMonths[0] - (qMonths[0] % 100 <= 3 ? 91 : 3)));
-    const pq = pqM.length ? salesAgg(pqM[0], pqM[pqM.length - 1]).sales : null;
-    F.prov = keep;
-    const g = ly ? (cur / ly - 1) * 100 : null, target = 15;
+    const q = S.cal.get(F.to).year_quarter;
+    const qMonths = S.months.filter(m => S.cal.get(m).year_quarter === q && m <= F.to);
+    const lyMonths = qMonths.map(m => `${+m.slice(0, 4) - 1}${m.slice(4)}`).filter(m => S.cal.has(m));
+    const cur = ventas(qMonths[0], qMonths[qMonths.length - 1], {}, cba.province_key).ventas;
+    const ly = lyMonths.length === qMonths.length ? ventas(lyMonths[0], lyMonths[lyMonths.length - 1], {}, cba.province_key).ventas : null;
+    const parcial = qMonths.length < 3;
+    $('s-cba').textContent = `${q.replace('-T', ' T')}${parcial ? ` (hasta ${long(F.to)}, trimestre parcial)` : ''} vs. los mismos meses del año anterior · respeta canal y producto; la provincia es siempre Córdoba`;
     const el = $('goal-cba'); el.textContent = '';
+    const g = ly ? (cur / ly - 1) * 100 : null, target = 15;
     const big = document.createElement('div'); big.className = 'big';
-    big.textContent = g == null ? '–' : `${g > 0 ? '+' : ''}${nf1.format(g)} %`;
-    const badge = document.createElement('span');
-    const okGoal = g != null && g >= target;
-    badge.className = 'badge ' + (okGoal ? 'good' : 'bad');
+    big.textContent = g == null ? 'Sin datos' : `${g > 0 ? '+' : ''}${nf1.format(g)} %`;
+    el.appendChild(big);
+    if (g == null) {
+      const s = document.createElement('small'); s.textContent = 'No hay datos del mismo trimestre del año anterior (los datos empiezan en enero de 2024). Elegí un mes "Hasta" de 2025.';
+      el.appendChild(s); return;
+    }
+    const okGoal = g >= target;
+    const badge = document.createElement('span'); badge.className = 'badge ' + (okGoal ? 'good' : 'bad');
     badge.textContent = okGoal ? '✓ Meta cumplida (+15 %)' : '✕ Por debajo de la meta (+15 %)';
     const track = document.createElement('div'); track.className = 'bar-track';
-    const max = Math.max(30, (g || 0) + 5);
-    const fill = document.createElement('div'); fill.className = 'bar-fill'; fill.style.width = `${Math.max(0, Math.min(100, (g || 0) / max * 100))}%`;
+    const max = Math.max(30, g + 5);
+    const fill = document.createElement('div'); fill.className = 'bar-fill'; fill.style.width = `${Math.max(0, Math.min(100, g / max * 100))}%`;
     const tgt = document.createElement('div'); tgt.className = 'bar-target'; tgt.style.left = `${target / max * 100}%`; tgt.title = 'Meta +15 %';
     track.append(fill, tgt);
     const s1 = document.createElement('small');
-    s1.textContent = `${q.replace('-T', ' T')}: $${nf1.format(cur / 1e6)} M vs. $${nf1.format(ly / 1e6)} M en el mismo trimestre de ${Math.floor(prevYear[0] / 100)}.`;
-    const s2 = document.createElement('small');
-    if (pq) { const d = (cur / pq - 1) * 100; s2.textContent = `Contra el trimestre anterior: ${d > 0 ? '+' : ''}${nf1.format(d)} %. La línea negra marca la meta.`; }
-    el.append(big, badge, track, s1, s2);
+    s1.textContent = `$${nf1.format(cur / 1e6)} M vs. $${nf1.format(ly / 1e6)} M en ${long(lyMonths[0])}${lyMonths.length > 1 ? ' – ' + long(lyMonths[lyMonths.length - 1]) : ''}. La línea negra marca la meta.`;
+    el.append(badge, track, s1);
   }
 
+  // Días de entrega: SUM(suma_dias_entrega) / SUM(envios_entregados) por provincia y trimestre.
+  // Sin producto -> mart_entregas_mes; con producto -> mart_entregas_producto_mes.
   function renderShipping() {
-    const qs = [...new Set(S.months.filter(m => inRange(m, F.from, F.to)).map(quarterOf))];
+    const mart = F.prod === 'all' ? M.ent : M.entp;
+    const rows = where(mart, F.from, F.to, { prov: true });
+    const qs = monthsIn(F.from, F.to).map(m => S.cal.get(m).year_quarter).filter((q, i, all) => i === 0 || q !== all[i - 1]);   // trimestres del eje, en orden
     const mza = S.provinces.find(p => p.code === 'MZA');
     const ds = S.provinces.map(p => {
       const data = qs.map(q => {
-        let s = 0, n = 0;
-        for (const x of D.ships) if (x.prov === p.province_key && quarterOf(x.ym) === q && inRange(x.ym, F.from, F.to) && okCh(x.ch)) { s += x.days; n++; }
-        return n ? s / n : null;
+        const r = rows.filter(x => x.province_key === p.province_key && x.year_quarter === q);
+        const n = sum(r, 'envios_entregados');
+        return n ? sum(r, 'suma_dias_entrega') / n : null;
       });
       const hl = p.province_key === mza.province_key || p.province_key === F.prov;
       return line(p.name, data, hl ? css('--series-2') : css('--muted-mark'), { borderWidth: hl ? 2.5 : 1.5, order: hl ? 0 : 1, pointRadius: hl ? 3 : 0 });
@@ -726,12 +742,17 @@ footer code { font-size: 11.5px; }
     const opts = baseOptions(v => `${nf1.format(v)} d`);
     opts.plugins.tooltip.itemSort = (a, b) => b.parsed.y - a.parsed.y;
     upsert('c-ship', { type: 'line', data: { labels: qs.map(q => q.replace('-T', ' T')), datasets: ds }, options: opts });
-    legend('lg-ship', [{ label: 'Mendoza' + (F.prov !== 'all' && F.prov !== mza.province_key ? ' y ' + S.provinces.find(p => p.province_key === F.prov).name : ''), color: css('--series-2') }, { label: 'Resto de las provincias', color: css('--muted-mark') }], 'line');
+    const extra = F.prov !== 'all' && F.prov !== mza.province_key ? ' y ' + provName(F.prov) : '';
+    legend('lg-ship', [{ label: 'Mendoza' + extra, color: css('--series-2') }, { label: 'Resto de las provincias', color: css('--muted-mark') }], 'line');
+    const notes = [];
+    if (F.prod !== 'all') notes.push(`Envíos de pedidos que incluyen ${prodName()}.`);
+    if (F.prov !== 'all') notes.push('El filtro de provincia resalta la línea elegida; las demás quedan para comparar.');
+    note('n-ship', notes.join(' '));
     table('t-ship', ['Trimestre', ...ds.map(d => d.label)], qs.map((q, i) => [q, ...ds.map(d => d.data[i] == null ? '–' : nf2.format(d.data[i]))]));
   }
 
   // Re-render si cambia el tema del sistema (los colores salen de los tokens CSS)
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (D.orders) render(); });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (M.ventas) render(); });
 })();
 </script>
 </body>
