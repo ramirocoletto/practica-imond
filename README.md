@@ -1,206 +1,530 @@
-# Práctica — Introducción al Marketing Online y los Negocios Digitales
+# EcoBottle AR — Mini ecosistema de datos comercial
 
-Este repositorio tiene los datos de **EcoBottle AR** para la práctica.
+Trabajo práctico de **Introducción al Marketing Online y los Negocios Digitales**.
+A partir de los datos de origen de EcoBottle AR (carpeta `raw/`) se arma un **data warehouse con modelo estrella (Kimball)** en DuckDB y un **tablero comercial** publicado en GitHub Pages que lee las tablas de `dw/`.
 
-- **Consigna:** [Práctica](https://docs.google.com/document/d/15RNP3FVqLjO4jzh80AAkK6mUR5DOLqPxLjQxqvdzrYg/edit?usp=sharing)
-- **Diagrama de las tablas de origen (DER):** [ver más abajo](#diagrama-de-las-tablas-de-origen-der)
+- **Tablero en línea:** https://ramirocoletto.github.io/practica-imond/
+- **Diagrama completo del modelo:** [`dw/modelo_estrella.md`](./dw/modelo_estrella.md)
+- **Diagrama de las tablas de origen:** [`assets/DER.png`](./assets/DER.png)
 
-## ¿Qué hay en el repositorio?
+![Captura del tablero (últimos 3 meses)](./assets/dashboard.png)
+
+---
+
+## Contenido
+
+1. [Estructura del repositorio](#estructura-del-repositorio)
+2. [Instrucciones de ejecución](#instrucciones-de-ejecución)
+3. [Modelo estrella](#modelo-estrella)
+4. [Supuestos](#supuestos)
+5. [Diccionario de datos](#diccionario-de-datos)
+6. [Consultas clave (KPIs)](#consultas-clave-kpis)
+7. [Tablero](#tablero)
+8. [Hallazgos](#hallazgos)
+9. [Convenciones del repositorio](#convenciones-del-repositorio)
+
+---
+
+## Estructura del repositorio
 
 ```
-raw/               los datos de origen: un archivo CSV por tabla (en SQL: raw.<tabla>)
-sql/               acá escribís tus transformaciones en SQL        ← tu trabajo va acá
-run_sql.py         ejecuta tus archivos SQL y arma el data warehouse
-requirements.txt   lo que hay que instalar (DuckDB)
-dw/                el data warehouse: se crea solo al ejecutar run_sql.py
-generator/         el programa que creó los datos de raw/ (no hace falta usarlo)
-assets/            el diagrama de tablas de origen (DER)
+raw/                  datos de origen: un CSV por tabla (no se modifican)
+sql/
+  01_dimensiones.sql  10 dimensiones (CREATE TABLE + INSERT ... SELECT)
+  02_hechos.sql       6 tablas de hechos con PRIMARY KEY y FOREIGN KEY
+  03_consultas.sql    controles de calidad + KPIs + metas y hallazgos
+run_sql.py            arma el data warehouse ejecutando sql/ y exporta a dw/
+dw/                   el data warehouse en CSV (lo que lee el tablero) + diagrama
+dashboard/index.html  el tablero (HTML + Chart.js), publicado con GitHub Pages
+index.html            redirige la raíz del sitio al tablero
+assets/               DER de origen y captura del tablero
+requirements.txt      dependencias (DuckDB)
+generator/            programa del profesor que generó los datos de raw/
 ```
 
-> ⚠️ **No modifiques los archivos de `raw/`.** Son los datos de origen. Tus consultas SQL los leen y el resultado queda en `dw/`.
+## Instrucciones de ejecución
 
-## Los datos en un minuto
-
-- Son una **foto del sistema de ventas** de EcoBottle, tomada el **30/09/2025 a las 23:59:59**.
-- Tienen los pedidos del **01/01/2024 al 30/09/2025**.
-- Los montos están en **pesos argentinos**, y los precios de lista **no incluyen IVA**.
-- Las fechas y horas están en **hora de Argentina**.
-- Una **celda vacía** en un CSV significa que ese dato no existe. En SQL aparece como `NULL`.
-
-## Las tablas
-
-| Archivo | Qué guarda | Filas |
-|---|---|---:|
-| `channel.csv` | Los 2 canales de venta: `ONLINE` (web) y `OFFLINE` (tiendas) | 2 |
-| `province.csv` | Las 4 provincias donde opera la empresa | 4 |
-| `product_category.csv` | Categorías de producto: *Bottles* → *Classic* y *Sport* | 3 |
-| `product.csv` | Los 2 productos: Classic A y Sport B | 2 |
-| `store.csv` | Las 4 tiendas físicas | 4 |
-| `customer.csv` | Los clientes | ~3.500 |
-| `address.csv` | Las direcciones de clientes y tiendas | ~3.800 |
-| `sales_order.csv` | Los pedidos: quién compró, cuándo, por qué canal y cuánto pagó | ~12.000 |
-| `sales_order_item.csv` | Los productos de cada pedido (una fila por producto) | ~14.500 |
-| `payment.csv` | El pago de cada pedido | ~12.000 |
-| `shipment.csv` | Los envíos por correo | ~7.000 |
-| `web_session.csv` | Las visitas a la web | ~100.000 |
-| `nps_response.csv` | Las respuestas a la encuesta de satisfacción (NPS) | ~3.000 |
-
-En SQL, cada archivo es una tabla del esquema `raw`: `raw/sales_order.csv` se consulta como `raw.sales_order`.
-
-### Diagrama de las tablas de origen (DER)
-
-Cada caja es una tabla (un CSV de `raw/`) y cada línea une una clave foránea (FK) con la clave primaria (PK) a la que apunta.
-
-![Diagrama entidad-relación de las tablas de origen](./assets/DER.png)
-
-## Cómo leer los datos
-
-### Pedidos
-- **Pedido online:** `store_id` está vacío.
-- **Compra en tienda:** `store_id` indica la tienda, y la "dirección de envío" es la dirección de la tienda (el cliente se lleva el producto en el momento).
-- **Las cuentas siempre cierran:**
-  - `line_total` = cantidad × precio − descuento
-  - `subtotal` = suma de los `line_total` del pedido
-  - `tax_amount` = 21 % del subtotal (IVA)
-  - `total_amount` = subtotal + IVA + costo de envío
-
-### Estados de un pedido (`sales_order.status`)
-
-| Estado | Qué significa | ¿Cuenta como venta? |
-|---|---|:---:|
-| `CREATED` | Se hizo el pedido pero todavía no se pagó | No |
-| `PAID` | Está pagado pero todavía no se entregó | Sí |
-| `FULFILLED` | Ya se entregó (o se compró en la tienda) | Sí |
-| `CANCELLED` | Se canceló: el pago fue rechazado, no se pagó a tiempo o el cliente se arrepintió | No |
-| `REFUNDED` | Se entregó, pero después se devolvió el dinero | No |
-
-### Pagos y envíos
-- Cada pedido tiene **un pago**. Si el pago no se concretó, `paid_at` está vacío.
-- **Solo tienen envío** (`shipment`) los pedidos que viajan por correo: los online y algunos que la tienda manda a domicilio. Las compras en tienda no tienen envío.
-- **Estados del envío:**
-  - `READY`: se está preparando.
-  - `SHIPPED`: está viajando.
-  - `DELIVERED`: se entregó.
-  - `CANCELLED`: no salió.
-
-### Clientes y visitas a la web
-- Un cliente con `status = 'I'` dio de baja su cuenta. Sus compras anteriores siguen en los datos.
-- En `web_session`, un `customer_id` vacío es un visitante que no inició sesión.
-- **Origen de la visita** (`source`):
-  - `ads`: publicidad en redes.
-  - `direct`: entró directo o desde el newsletter.
-  - `referral`: vino de otro sitio o del newsletter.
-  - `organic`: buscadores.
-
-### Encuesta NPS
-- **Cuándo se manda:**
-  - Pedidos entregados por correo: **7 días después de la entrega**.
-  - Compras en tienda: **al día siguiente**.
-- El puntaje va de 0 a 10. Un `customer_id` vacío es una respuesta anónima.
-- La encuesta **no tiene número de pedido**: se relaciona con el cliente (`customer_id`) y con el canal (`channel_id`).
-
-## Para empezar
-
-Vas a escribir las transformaciones en **SQL** usando **DuckDB**, una base de datos que se instala con Python. No necesita servidor ni crear cuentas.
-
-### 1. Preparar tu computadora (una sola vez)
-
-Necesitás tener instalado Python 3.9 o más nuevo y Git. Primero hacé un **fork** de este repositorio en GitHub y después, en la terminal:
+Requisitos: Python 3.9+ y Git.
 
 ```bash
-git clone URL-DE-TU-FORK
-cd NOMBRE-DE-LA-CARPETA
-python -m venv .venv
-```
+# 1. Clonar el fork
+git clone https://github.com/ramirocoletto/practica-imond.git
+cd practica-imond
 
-Activá el entorno virtual:
+# 2. Crear y activar el entorno virtual
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-- **Mac / Linux:** `source .venv/bin/activate`
-- **Windows:** `.venv\Scripts\activate`
-
-Instalá DuckDB:
-
-```bash
+# 3. Instalar dependencias
 pip install -r requirements.txt
-```
 
-> En Mac, si el comando `python` no existe, usá `python3`. Cada vez que abras una terminal nueva, volvé a activar el entorno.
-
-### 2. Explorar las tablas de origen
-
-```bash
-python run_sql.py --explorar
-```
-
-Abre DuckDB en el navegador con las 13 tablas de origen cargadas. Hacé clic en una tabla para ver sus columnas y datos, y escribí consultas para conocerla:
-
-```sql
-SELECT * FROM raw.sales_order LIMIT 10;
-DESCRIBE raw.sales_order;
-```
-
-- **No ejecuta tus archivos de `sql/`**, así que funciona aunque todavía no hayas escrito nada o tengas errores.
-- **Necesita internet.** Sin conexión se abre una consola SQL en la terminal: terminás cada consulta con `;` y salís escribiendo `salir`.
-- **Para cerrar,** volvé a la terminal y presioná Enter.
-
-### 3. Escribir tus transformaciones en SQL
-
-| Archivo | Qué va adentro |
-|---|---|
-| `sql/01_dimensiones.sql` | Las tablas de dimensiones. Tiene un **ejemplo resuelto** (`dim_product`) para que veas cómo se hace. |
-| `sql/02_hechos.sql` | Las tablas de hechos, con sus `FOREIGN KEY` hacia las dimensiones. |
-| `sql/03_consultas.sql` | Consultas para revisar el modelo y calcular los KPIs. |
-
-Cuando una consulta te funciona mientras explorás, pasala al archivo que corresponde. Podés agregar más archivos: se ejecutan en orden alfabético (`01_...`, `02_...`, `03_...`).
-
-### 4. Armar el data warehouse
-
-```bash
+# 4. Armar el data warehouse (crea warehouse.duckdb y regenera dw/)
 python run_sql.py
 ```
 
-Esto hace cuatro cosas:
+`run_sql.py` borra y vuelve a crear la base, ejecuta `sql/01_…`, `02_…` y `03_…` en orden, muestra en la terminal el resultado de cada consulta de `03_consultas.sql`, exporta cada tabla a `dw/<tabla>.csv` y dibuja el modelo en `dw/modelo_estrella.md`.
 
-1. Crea la base de datos `warehouse.duckdb` desde cero.
-2. Ejecuta tus archivos de `sql/` en orden y muestra en la terminal el resultado de cada `SELECT`.
-3. Guarda cada tabla que creaste como CSV en `dw/`. **Esos CSV son los que después abrís en Power BI.**
-4. Dibuja tu modelo estrella en `dw/modelo_estrella.md`.
-
-Si hay un error, te dice en qué archivo y en qué sentencia está y por qué falló. Lo corregís y volvés a ejecutar. Como todo se arma desde cero cada vez, no hace falta borrar tablas a mano.
-
-> La base `warehouse.duckdb` no se sube a GitHub (está en `.gitignore`): cualquiera la vuelve a crear con `python run_sql.py`.
-
-### 5. Ver tu modelo
-
-- **El diagrama:** abrí `dw/modelo_estrella.md` en GitHub y vas a ver el modelo dibujado, con las claves y las relaciones. Podés copiarlo en tu README. En VS Code se ve con la extensión *Markdown Preview Mermaid Support*.
-- **Tus tablas en el navegador:** `python run_sql.py --ui` arma el data warehouse y después abre DuckDB con tus tablas y las de origen, para revisar resultados y armar gráficos rápidos.
-
-### Mini guía de SQL en DuckDB
-
-```sql
--- Ver las primeras filas de una tabla de origen
-SELECT * FROM raw.sales_order LIMIT 10;
-
--- Ver sus columnas y tipos
-DESCRIBE raw.sales_order;
-
--- Agrupar por mes
-SELECT DATE_TRUNC('month', order_date) AS mes, COUNT(*) AS pedidos
-FROM raw.sales_order
-GROUP BY mes
-ORDER BY mes;
-```
-
-- **Datos vacíos:** se buscan con `IS NULL`, y `COALESCE(columna, valor)` reemplaza un vacío por un valor.
-- **Más ayuda:** [documentación de SQL de DuckDB](https://duckdb.org/docs/current/sql/introduction.html).
-
-## ¿Y la carpeta `generator/`?
-
-Es el programa que **inventó estos datos** simulando el negocio: clientes que se registran, compran, pagan, reciben el envío y responden la encuesta. **No lo necesitás para la práctica.** Si te interesa ver cómo se arma un conjunto de datos de prueba, podés leerlo; el detalle está en [`generator/README.md`](./generator/README.md).
-
-Si alguna vez querés volver a generar los datos o comprobar que están bien:
+Otros modos:
 
 ```bash
-python generator/generate_raw.py     # vuelve a crear los CSV de raw/ (salen idénticos)
-python generator/validate_raw.py     # revisa que los datos cumplan todas las reglas
+python run_sql.py --explorar   # abre DuckDB en el navegador solo con las tablas raw
+python run_sql.py --ui         # arma el DW y abre DuckDB con las tablas del modelo
 ```
+
+### Ver el tablero en la computadora
+
+El tablero lee los CSV de `dw/`, por eso necesita un servidor (abrir el HTML con doble clic no funciona por seguridad del navegador):
+
+```bash
+python -m http.server 8000
+# abrir http://localhost:8000/
+```
+
+### Publicarlo en GitHub Pages
+
+En el repositorio de GitHub: **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main` / `(root)` → Save**. A los minutos queda en `https://ramirocoletto.github.io/practica-imond/`. Cada vez que se corre `run_sql.py` y se hace `git push`, el tablero muestra los datos nuevos.
+
+## Modelo estrella
+
+Seis tablas de hechos comparten las dimensiones (constelación de hechos / *bus matrix* de Kimball). Las dimensiones usan **claves subrogadas** (`*_key`) y guardan la **clave natural** del origen (`*_id`). La fecha usa una clave inteligente `AAAAMMDD`.
+
+```mermaid
+erDiagram
+    dim_channel ||--o{ fact_nps : "channel_key"
+    dim_channel ||--o{ fact_orders : "channel_key"
+    dim_channel ||--o{ fact_payments : "channel_key"
+    dim_channel ||--o{ fact_sales : "channel_key"
+    dim_channel ||--o{ fact_shipments : "channel_key"
+    dim_channel ||--o{ fact_web_sessions : "channel_key"
+    dim_customer ||--o{ fact_nps : "customer_key"
+    dim_customer ||--o{ fact_orders : "customer_key"
+    dim_customer ||--o{ fact_payments : "customer_key"
+    dim_customer ||--o{ fact_sales : "customer_key"
+    dim_customer ||--o{ fact_shipments : "customer_key"
+    dim_customer ||--o{ fact_web_sessions : "customer_key"
+    dim_date ||--o{ fact_nps : "date_key"
+    dim_date ||--o{ fact_orders : "date_key"
+    dim_date ||--o{ fact_payments : "order_date_key"
+    dim_date ||--o{ fact_payments : "paid_date_key"
+    dim_date ||--o{ fact_sales : "date_key"
+    dim_date ||--o{ fact_shipments : "delivered_date_key"
+    dim_date ||--o{ fact_shipments : "order_date_key"
+    dim_date ||--o{ fact_shipments : "shipped_date_key"
+    dim_date ||--o{ fact_web_sessions : "date_key"
+    dim_device ||--o{ fact_web_sessions : "device_key"
+    dim_order_status ||--o{ fact_orders : "status_key"
+    dim_order_status ||--o{ fact_sales : "status_key"
+    dim_payment_method ||--o{ fact_orders : "payment_method_key"
+    dim_payment_method ||--o{ fact_payments : "payment_method_key"
+    dim_product ||--o{ fact_sales : "product_key"
+    dim_province ||--o{ fact_orders : "province_key"
+    dim_province ||--o{ fact_sales : "province_key"
+    dim_province ||--o{ fact_shipments : "province_key"
+    dim_store ||--o{ fact_orders : "store_key"
+    dim_store ||--o{ fact_sales : "store_key"
+    dim_store ||--o{ fact_shipments : "store_key"
+    dim_traffic_source ||--o{ fact_web_sessions : "source_key"
+```
+
+| Hecho | Grano (una fila =) | Métricas principales | Dimensiones |
+|---|---|---|---|
+| `fact_sales` | un producto dentro de un pedido | quantity, line_total, total_amount_allocated | fecha, producto, cliente, canal, tienda, provincia, estado |
+| `fact_orders` | un pedido | total_amount, subtotal, tax_amount, shipping_fee, units | fecha, cliente, canal, tienda, provincia, estado, medio de pago |
+| `fact_payments` | un pago | amount, minutes_to_pay | fecha de pedido y de cobro, medio de pago, cliente, canal |
+| `fact_shipments` | un envío por correo | hours_to_ship, days_in_transit, days_to_deliver | fecha de pedido / despacho / entrega, cliente, canal, tienda, provincia |
+| `fact_web_sessions` | una visita a la web | active_user_id, duration_seconds | fecha, cliente, canal, origen, dispositivo |
+| `fact_nps` | una respuesta NPS | score, nps_points, is_promoter, is_detractor | fecha, cliente, canal |
+
+**Matriz de dimensiones compartidas** (✓ = el hecho usa la dimensión):
+
+| | fecha | canal | provincia | producto | tienda | cliente | estado | medio de pago | origen | dispositivo |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| `fact_sales` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
+| `fact_orders` | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | ✓ | | |
+| `fact_payments` | ✓ | ✓ | | | | ✓ | | ✓ | | |
+| `fact_shipments` | ✓ | ✓ | ✓ | | ✓ | ✓ | | | | |
+| `fact_web_sessions` | ✓ | ✓ | | | | ✓ | | | ✓ | ✓ |
+| `fact_nps` | ✓ | ✓ | | | | ✓ | | | | |
+
+## Supuestos
+
+1. **Qué es una venta:** solo los pedidos con estado `PAID` o `FULFILLED` (regla de la consigna). Los hechos guardan **todos** los pedidos y marcan `is_sale`, para poder analizar también cancelaciones y reembolsos.
+2. **Montos:** `total_amount` incluye IVA (21 %) y costo de envío; `line_total` es neto, sin IVA. "Total Ventas" y "Ticket Promedio" usan `total_amount`; el "Ranking por producto" usa `line_total`, como pide la consigna.
+3. **Ventas filtradas por producto:** un pedido puede tener los dos productos. Para filtrar "Ventas" por producto sin cambiar su definición, `fact_sales.total_amount_allocated` reparte el `total_amount` del pedido entre sus líneas en proporción a `line_total`. La suma por pedido da exactamente el total (se verifica en `03_consultas.sql`, control A2).
+4. **Provincia de una venta:** la de la **dirección de envío** (`shipping_address_id → address.province_id`). En compras en tienda es la dirección de la tienda.
+5. **Usuarios activos:** `COUNT(DISTINCT active_user_id)`, donde `active_user_id` es `C-<customer_id>` si la persona inició sesión y `S-<session_id>` si es anónima (cada sesión anónima cuenta como un usuario). Las sesiones web pertenecen al canal ONLINE y no tienen provincia ni producto.
+6. **NPS:** `(%9-10 − %0-6) × 100`. Se guarda `nps_points` (+100 / 0 / −100) para que el NPS de cualquier corte sea `AVG(nps_points)`. La encuesta no tiene pedido asociado: se analiza por canal y fecha de respuesta, no por provincia ni producto.
+7. **Datos faltantes:** en lugar de FKs nulas se usa la fila **−1** ("Anónimo", "Online (sin tienda)", "Sin dato") en `dim_customer`, `dim_store`, `dim_traffic_source` y `dim_device`. Las fechas opcionales (`paid_date_key`, `shipped_date_key`, `delivered_date_key`) quedan en NULL cuando el evento no ocurrió.
+8. **Fechas:** la foto del sistema es del 30/09/2025 23:59:59, hora de Argentina. `dim_date` cubre del 01/01/2024 al 30/09/2025; el último trimestre (2025-T3) está completo.
+9. **Tiempos de entrega:** se miden del pedido a la entrega (`days_to_deliver`), solo para envíos `DELIVERED`, y se asignan al trimestre de la fecha del pedido.
+10. **Meta Córdoba (+15 %):** se compara el último trimestre (2025-T3) contra el mismo trimestre del año anterior (2024-T3), para no mezclar estacionalidad; también se muestra la variación contra el trimestre anterior.
+11. **Tablero en GitHub Pages en lugar de Looker Studio / Power BI:** se trabaja en Mac (Power BI Desktop no existe para macOS). El tablero es una página estática que lee directamente los CSV de `dw/`, así cumple que la fuente sea el data warehouse.
+
+## Diccionario de datos
+
+Tipos tal como quedan en DuckDB. PK = clave primaria, FK = clave foránea.
+
+#### `dim_date`
+
+Calendario día a día (01/01/2024 – 30/09/2025). Una fila por día.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `date_key` | INTEGER | PK | Clave AAAAMMDD (ej. 20240131) |
+| `full_date` | DATE |  | Fecha |
+| `year` | INTEGER |  | Año |
+| `quarter` | INTEGER |  | Trimestre 1–4 |
+| `year_quarter` | VARCHAR |  | Ej. 2025-T3 |
+| `month` | INTEGER |  | Mes 1–12 |
+| `month_name` | VARCHAR |  | Enero…Diciembre |
+| `year_month` | VARCHAR |  | Ej. 2025-09 |
+| `month_start` | DATE |  | Primer día del mes (equivale a DATE_TRUNC) |
+| `iso_week` | INTEGER |  | Semana ISO |
+| `day_of_month` | INTEGER |  | Día 1–31 |
+| `day_of_week` | INTEGER |  | 1 = lunes … 7 = domingo |
+| `day_name` | VARCHAR |  | Lunes…Domingo |
+| `is_weekend` | BOOLEAN |  | Sábado o domingo |
+
+#### `dim_channel`
+
+Canal de venta. Una fila por canal.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `channel_key` | INTEGER | PK | Clave subrogada |
+| `channel_id` | INTEGER |  | Clave natural (raw.channel) |
+| `code` | VARCHAR |  | ONLINE / OFFLINE |
+| `name` | VARCHAR |  | Tienda Online / Tiendas Físicas |
+
+#### `dim_province`
+
+Provincia. Una fila por provincia.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `province_key` | INTEGER | PK | Clave subrogada |
+| `province_id` | INTEGER |  | Clave natural (raw.province) |
+| `name` | VARCHAR |  | Buenos Aires, Córdoba, Santa Fe, Mendoza |
+| `code` | VARCHAR |  | BA / CBA / SF / MZA |
+| `iso_3166_2` | VARCHAR |  | Código ISO para mapas (AR-B, AR-X, AR-S, AR-M) |
+
+#### `dim_product`
+
+Producto con la jerarquía de categorías aplanada. Una fila por producto.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `product_key` | INTEGER | PK | Clave subrogada |
+| `product_id` | INTEGER |  | Clave natural (raw.product) |
+| `sku` | VARCHAR |  | Código de producto |
+| `name` | VARCHAR |  | Classic A Bottle / Sport B Bottle |
+| `category` | VARCHAR |  | Classic / Sport |
+| `family` | VARCHAR |  | Bottles (categoría padre) |
+| `list_price` | DECIMAL(12,2) |  | Precio de lista sin IVA |
+| `status` | VARCHAR |  | Activo / Inactivo |
+
+#### `dim_store`
+
+Tienda física con su dirección aplanada. Fila −1 = pedidos online (sin tienda).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `store_key` | INTEGER | PK | Clave subrogada (−1 = Online) |
+| `store_id` | INTEGER |  | Clave natural (NULL en la fila −1) |
+| `name` | VARCHAR |  | Tienda BA, Tienda CBA, … |
+| `address_line` | VARCHAR |  | Calle y número |
+| `city` | VARCHAR |  | Ciudad |
+| `province_name` | VARCHAR |  | Provincia de la tienda |
+| `province_code` | VARCHAR |  | BA / CBA / SF / MZA |
+
+#### `dim_customer`
+
+Cliente. Fila −1 = anónimo (NPS sin cliente, sesiones sin login).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `customer_key` | INTEGER | PK | Clave subrogada (−1 = anónimo) |
+| `customer_id` | INTEGER |  | Clave natural (NULL en la fila −1) |
+| `email` | VARCHAR |  | Email (único) |
+| `first_name` | VARCHAR |  | Nombre |
+| `last_name` | VARCHAR |  | Apellido |
+| `full_name` | VARCHAR |  | Nombre y apellido |
+| `phone` | VARCHAR |  | Teléfono (puede faltar) |
+| `status_code` | VARCHAR |  | A / I (? en la fila −1) |
+| `status` | VARCHAR |  | Activo / Inactivo (baja) / Desconocido |
+| `created_at` | TIMESTAMP |  | Fecha y hora de alta |
+| `created_date` | DATE |  | Fecha de alta |
+| `cohort_month` | VARCHAR |  | Mes de alta AAAA-MM |
+
+#### `dim_order_status`
+
+Estado del pedido y regla de qué cuenta como venta.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `status_key` | INTEGER | PK | Clave |
+| `status_code` | VARCHAR |  | CREATED / PAID / FULFILLED / CANCELLED / REFUNDED |
+| `description` | VARCHAR |  | Descripción |
+| `is_sale` | BOOLEAN |  | TRUE solo para PAID y FULFILLED |
+
+#### `dim_payment_method`
+
+Medio de pago.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `payment_method_key` | INTEGER | PK | Clave |
+| `method_code` | VARCHAR |  | CARD / GATEWAY / CASH / TRANSFER |
+| `description` | VARCHAR |  | Tarjeta, Mercado Pago, Efectivo, Transferencia |
+
+#### `dim_traffic_source`
+
+Origen de la visita web, agrupado por tipo de marketing.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `source_key` | INTEGER | PK | Clave (−1 = sin dato) |
+| `source_code` | VARCHAR |  | ads / direct / referral / organic |
+| `description` | VARCHAR |  | Descripción |
+| `marketing_type` | VARCHAR |  | Pago / Propio / Ganado |
+
+#### `dim_device`
+
+Dispositivo de la visita web.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `device_key` | INTEGER | PK | Clave (−1 = sin dato) |
+| `device_code` | VARCHAR |  | mobile / desktop / tablet |
+| `description` | VARCHAR |  | Celular / Computadora / Tablet |
+
+#### `fact_sales`
+
+**Grano: una línea de pedido** (un producto dentro de un pedido). Origen: `sales_order_item` + `sales_order`.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `order_item_id` | BIGINT | PK | Clave natural de la línea |
+| `order_id` | BIGINT |  | Número de pedido (dimensión degenerada) |
+| `date_key` | INTEGER | FK → dim_date | Fecha del pedido |
+| `product_key` | INTEGER | FK → dim_product | Producto |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente |
+| `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `store_key` | INTEGER | FK → dim_store | Tienda (−1 = online) |
+| `province_key` | INTEGER | FK → dim_province | Provincia de la dirección de envío |
+| `status_key` | INTEGER | FK → dim_order_status | Estado del pedido |
+| `is_sale` | BOOLEAN |  | El pedido cuenta como venta |
+| `quantity` | INTEGER |  | Unidades (> 0) |
+| `unit_price` | DECIMAL(12,2) |  | Precio unitario sin IVA |
+| `gross_amount` | DECIMAL(12,2) |  | quantity × unit_price |
+| `discount_amount` | DECIMAL(12,2) |  | Descuento de la línea |
+| `line_total` | DECIMAL(12,2) |  | gross_amount − discount_amount (sin IVA) |
+| `total_amount_allocated` | DECIMAL(12,2) |  | Total del pedido (con IVA y envío) repartido en proporción a line_total |
+
+#### `fact_orders`
+
+**Grano: un pedido.** Origen: `sales_order` (+ `payment`, `shipment`, `sales_order_item`).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `order_id` | BIGINT | PK | Clave natural del pedido |
+| `date_key` | INTEGER | FK → dim_date | Fecha del pedido |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente |
+| `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `store_key` | INTEGER | FK → dim_store | Tienda (−1 = online) |
+| `province_key` | INTEGER | FK → dim_province | Provincia de la dirección de envío |
+| `status_key` | INTEGER | FK → dim_order_status | Estado |
+| `payment_method_key` | INTEGER | FK → dim_payment_method | Medio de pago (1 pago por pedido) |
+| `is_sale` | BOOLEAN |  | PAID o FULFILLED |
+| `has_shipment` | BOOLEAN |  | Viajó por correo |
+| `item_lines` | INTEGER |  | Cantidad de líneas |
+| `units` | INTEGER |  | Unidades totales |
+| `subtotal` | DECIMAL(12,2) |  | Suma de line_total (sin IVA) |
+| `discount_amount` | DECIMAL(12,2) |  | Descuentos del pedido |
+| `tax_amount` | DECIMAL(12,2) |  | IVA 21 % |
+| `shipping_fee` | DECIMAL(12,2) |  | Costo de envío |
+| `total_amount` | DECIMAL(12,2) |  | subtotal + IVA + envío |
+
+#### `fact_payments`
+
+**Grano: un pago.** Origen: `payment`.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `payment_id` | BIGINT | PK | Clave natural del pago |
+| `order_id` | BIGINT |  | Pedido (dimensión degenerada) |
+| `order_date_key` | INTEGER | FK → dim_date | Fecha del pedido |
+| `paid_date_key` | INTEGER | FK → dim_date | Fecha de cobro (NULL si no se cobró) |
+| `payment_method_key` | INTEGER | FK → dim_payment_method | Medio de pago |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente |
+| `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `payment_status` | VARCHAR |  | PENDING / PAID / FAILED / REFUNDED |
+| `transaction_ref` | VARCHAR |  | Referencia de la transacción |
+| `amount` | DECIMAL(12,2) |  | Importe |
+| `minutes_to_pay` | INTEGER |  | Minutos entre el pedido y el cobro |
+
+#### `fact_shipments`
+
+**Grano: un envío por correo.** Origen: `shipment`.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `shipment_id` | BIGINT | PK | Clave natural del envío |
+| `order_id` | BIGINT |  | Pedido (dimensión degenerada) |
+| `order_date_key` | INTEGER | FK → dim_date | Fecha del pedido |
+| `shipped_date_key` | INTEGER | FK → dim_date | Fecha de despacho |
+| `delivered_date_key` | INTEGER | FK → dim_date | Fecha de entrega |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente |
+| `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `store_key` | INTEGER | FK → dim_store | Tienda que despacha (−1 = online) |
+| `province_key` | INTEGER | FK → dim_province | Provincia de destino |
+| `carrier` | VARCHAR |  | Correo |
+| `tracking_number` | VARCHAR |  | Número de seguimiento |
+| `shipment_status` | VARCHAR |  | READY / SHIPPED / DELIVERED / CANCELLED |
+| `is_delivered` | BOOLEAN |  | Se entregó |
+| `hours_to_ship` | DECIMAL(8,2) |  | Horas del pedido al despacho |
+| `days_in_transit` | DECIMAL(8,2) |  | Días del despacho a la entrega |
+| `days_to_deliver` | DECIMAL(8,2) |  | Días del pedido a la entrega |
+
+#### `fact_web_sessions`
+
+**Grano: una visita a la web.** Origen: `web_session`.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `session_id` | BIGINT | PK | Clave natural de la sesión |
+| `date_key` | INTEGER | FK → dim_date | Fecha de inicio |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente (−1 = sin login) |
+| `channel_key` | INTEGER | FK → dim_channel | Siempre ONLINE |
+| `source_key` | INTEGER | FK → dim_traffic_source | Origen de la visita |
+| `device_key` | INTEGER | FK → dim_device | Dispositivo |
+| `active_user_id` | VARCHAR |  | 'C-<cliente>' si inició sesión, 'S-<sesión>' si es anónimo |
+| `is_logged_in` | BOOLEAN |  | Inició sesión |
+| `duration_seconds` | INTEGER |  | Duración (NULL si no tiene fin) |
+
+#### `fact_nps`
+
+**Grano: una respuesta NPS.** Origen: `nps_response`.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `nps_id` | BIGINT | PK | Clave natural de la respuesta |
+| `date_key` | INTEGER | FK → dim_date | Fecha de respuesta |
+| `customer_key` | INTEGER | FK → dim_customer | Cliente (−1 = anónimo) |
+| `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `score` | SMALLINT |  | Puntaje 0–10 |
+| `nps_category` | VARCHAR |  | Promotor (9–10) / Pasivo (7–8) / Detractor (0–6) |
+| `is_promoter` | INTEGER |  | 1 si es promotor |
+| `is_passive` | INTEGER |  | 1 si es pasivo |
+| `is_detractor` | INTEGER |  | 1 si es detractor |
+| `nps_points` | INTEGER |  | +100 / 0 / −100 → NPS = AVG(nps_points) |
+| `has_comment` | BOOLEAN |  | Dejó comentario |
+| `comment` | VARCHAR |  | Comentario libre |
+
+## Consultas clave (KPIs)
+
+Todas están en [`sql/03_consultas.sql`](./sql/03_consultas.sql) y se calculan **solo con el modelo estrella**. Resultados sobre todo el período (01/2024 – 09/2025):
+
+| KPI | Resultado |
+|---|---|
+| Total Ventas | **$382,4 M** (online $227,0 M · tiendas $155,4 M) |
+| Usuarios Activos | **73,8 K** usuarios únicos |
+| Ticket Promedio | **$34,8 K** (online $35,2 K · tiendas $34,2 K) |
+| NPS | **+30,0** (online +24,0 · tiendas +40,9) |
+| Ventas por provincia | Buenos Aires 37,3 % · Córdoba 23,4 % · Santa Fe 22,9 % · Mendoza 16,4 % |
+
+**$M Total Ventas**
+```sql
+SELECT SUM(f.total_amount) / 1e6 AS ventas_millones
+FROM fact_orders AS f
+WHERE f.is_sale;                       -- PAID + FULFILLED
+```
+
+**nK Usuarios Activos (por mes)**
+```sql
+SELECT d.year_month, COUNT(DISTINCT f.active_user_id) AS usuarios_activos
+FROM fact_web_sessions AS f
+JOIN dim_date AS d USING (date_key)
+GROUP BY d.year_month
+ORDER BY d.year_month;
+```
+
+**$K Ticket Promedio**
+```sql
+SELECT SUM(f.total_amount) / COUNT(*) AS ticket_promedio
+FROM fact_orders AS f
+WHERE f.is_sale;
+```
+
+**NPS por canal**
+```sql
+SELECT c.name AS canal,
+       (SUM(f.is_promoter) - SUM(f.is_detractor)) * 100.0 / COUNT(*) AS nps
+FROM fact_nps AS f
+JOIN dim_channel AS c USING (channel_key)
+GROUP BY c.name;
+```
+
+**Ventas por provincia**
+```sql
+SELECT p.name AS provincia, SUM(f.total_amount) AS ventas
+FROM fact_orders AS f
+JOIN dim_province AS p USING (province_key)
+WHERE f.is_sale
+GROUP BY p.name
+ORDER BY ventas DESC;
+```
+
+**Ranking mensual por producto**
+```sql
+SELECT d.month_start AS mes,             -- = DATE_TRUNC('month', order_date)
+       RANK() OVER (PARTITION BY d.month_start ORDER BY SUM(f.line_total) DESC) AS puesto,
+       p.name AS producto,
+       SUM(f.line_total) AS ventas_netas
+FROM fact_sales AS f
+JOIN dim_date AS d USING (date_key)
+JOIN dim_product AS p USING (product_key)
+WHERE f.is_sale
+GROUP BY d.month_start, p.name
+ORDER BY mes, puesto;
+```
+
+El archivo también tiene **controles de calidad** (filas del DW = filas de raw, ventas del DW = ventas calculadas en raw, cantidad de claves −1) y consultas para las **metas del trimestre** (crecimiento de Córdoba y días de entrega por provincia), tasa de cancelación por canal, conversión por origen de tráfico y fallas por medio de pago.
+
+## Tablero
+
+[`dashboard/index.html`](./dashboard/index.html) — HTML + [Chart.js](https://www.chartjs.org/) + [PapaParse](https://www.papaparse.com/), sin servidor. Lee `dw/fact_orders.csv`, `fact_sales.csv`, `fact_web_sessions.csv`, `fact_nps.csv`, `fact_shipments.csv` y las dimensiones de canal, provincia y producto.
+
+**Filtros** (arriba, afectan a todo el tablero): período desde / hasta con atajos (últimos 3 y 12 meses, todo), canal, provincia y producto.
+
+**Vistas:**
+
+| Vista | Qué muestra |
+|---|---|
+| Tarjetas | Total Ventas ($M), Usuarios Activos (nK), Ticket Promedio ($K) y NPS (pts), con flecha de variación contra el período anterior de igual duración |
+| Ventas por mes | Serie temporal por canal |
+| Usuarios activos por mes | Serie temporal |
+| Ventas por provincia | Barras con participación %; la provincia filtrada queda resaltada |
+| Ranking mensual por producto | Barras por mes + tabla "Top N" del mes elegido con variación vs. el mes anterior |
+| Tendencia del NPS | Serie mensual por canal |
+| Ticket promedio por mes | Serie temporal |
+| Metas del trimestre | Avance de Córdoba contra el +15 % y días de entrega por provincia con Mendoza resaltada |
+| Hallazgos | Conclusiones del análisis |
+
+Cada gráfico tiene "Ver datos" con la tabla de valores. Cuando un filtro no aplica a un indicador (por ejemplo, la provincia en usuarios activos o NPS), la tarjeta lo aclara. El tablero se adapta a celular y a modo oscuro.
+
+## Hallazgos
+
+- **El NPS online cayó a negativo en jul–sep 2024** (de +29 en junio a −27 en agosto), justo cuando los días de entrega subieron ~2,5 días en todas las provincias (Buenos Aires pasó de 3,7 a 6,5 días). Con la logística normalizada, el NPS volvió a +30: **la entrega es la principal palanca de satisfacción online.** Entre los comentarios de detractores aparecen sobre todo problemas de envío y producto ("Llegó con la caja dañada", "La tapa pierde líquido", "Tardó mucho más de lo esperado").
+- **Las tiendas físicas tienen mejor NPS** (+41 vs +24) y casi no tienen cancelaciones (1,2 % vs 8,3 % online).
+- **Córdoba ya superó la meta:** 2025-T3 vendió **+25,3 %** contra 2024-T3 (meta +15 %), aunque baja −5,3 % contra 2025-T2.
+- **Mendoza no es la provincia más lenta:** en 2025-T3 tarda 5,3 días, contra 5,5 de Córdoba, 5,2 de Santa Fe y 3,4 de Buenos Aires. La meta logística debería incluir a Córdoba.
+- **Mercado Pago tiene 9,8 % de pagos fallidos** (tarjeta 4,0 %): revisar la pasarela podría recuperar ventas online.
+- **Estacionalidad:** diciembre es el pico de ventas y de usuarios activos; Sport B lidera en verano (dic–feb) y en junio, y Classic A en invierno (jul–sep).
+
+## Convenciones del repositorio
+
+- Entorno virtual `.venv` (ignorado por Git) + `requirements.txt`.
+- `warehouse.duckdb` no se sube: se regenera con `python run_sql.py`. `dw/` sí se sube porque es la fuente del tablero.
+- Commits con [Conventional Commits](https://www.conventionalcommits.org/es/): `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, por ejemplo `feat(sql): agregar dimensiones del modelo estrella`.
+- Toda la gestión del repositorio se hace desde la terminal (`git add`, `git commit`, `git push`).
