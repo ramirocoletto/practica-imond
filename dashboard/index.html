@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoBottle AR — Tablero Comercial</title>
+<meta name="description" content="Tablero comercial de EcoBottle AR construido sobre las tablas del data warehouse (carpeta dw/).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg:            #f3f2ef;
+  --surface-1:     #fcfcfb;
+  --header:        #10302b;
+  --header-text:   #f3f7f5;
+  --border:        #e2e0da;
+  --grid:          #ecebe6;
+  --text-primary:  #0b0b0b;
+  --text-secondary:#52514e;
+  --text-muted:    #7a7975;
+  --series-1:      #2a78d6;  /* blue   — Classic A / Online / total */
+  --series-2:      #eb6834;  /* orange — Sport B / Físicas / Mendoza */
+  --series-3:      #1baf7a;  /* aqua   */
+  --muted-mark:    #c9c7c0;
+  --good:          #0ca30c;
+  --good-text:     #006300;
+  --critical:      #d03b3b;
+  --critical-text: #b42828;
+  --chip:          #eef4fc;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg:            #111110;
+    --surface-1:     #1a1a19;
+    --header:        #0c231f;
+    --header-text:   #e9f1ee;
+    --border:        #2e2e2b;
+    --grid:          #2a2a27;
+    --text-primary:  #f0efec;
+    --text-secondary:#c3c2b7;
+    --text-muted:    #9a998f;
+    --series-1:      #3987e5;
+    --series-2:      #d95926;
+    --series-3:      #199e70;
+    --muted-mark:    #4a4a46;
+    --good-text:     #3fc23f;
+    --critical-text: #f07a7a;
+    --chip:          #1e2a3a;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:            #111110;
+  --surface-1:     #1a1a19;
+  --header:        #0c231f;
+  --header-text:   #e9f1ee;
+  --border:        #2e2e2b;
+  --grid:          #2a2a27;
+  --text-primary:  #f0efec;
+  --text-secondary:#c3c2b7;
+  --text-muted:    #9a998f;
+  --series-1:      #3987e5;
+  --series-2:      #d95926;
+  --series-3:      #199e70;
+  --muted-mark:    #4a4a46;
+  --good-text:     #3fc23f;
+  --critical-text: #f07a7a;
+  --chip:          #1e2a3a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px 32px; }
+
+header.top {
+  background: var(--header); color: var(--header-text);
+  padding: 18px 0 16px;
+}
+header.top .wrap { padding-bottom: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; justify-content: space-between; }
+header.top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+header.top p { margin: 0; font-size: 12.5px; opacity: .8; }
+
+.filters {
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.filters .wrap { padding-bottom: 0; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+.filters label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.filters select, .filters button {
+  font: 500 13.5px Inter, system-ui, sans-serif; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; min-width: 120px;
+}
+.filters button { cursor: pointer; min-width: 0; }
+.filters button:hover { border-color: var(--text-muted); }
+.filters .presets { display: flex; gap: 6px; }
+.filters .presets button.on { background: var(--chip); border-color: var(--series-1); }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 18px 0 14px; }
+.card {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; min-width: 0;
+}
+.kpi .label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
+.kpi .value { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.kpi .delta { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.kpi .delta.up { color: var(--good-text); }
+.kpi .delta.down { color: var(--critical-text); }
+.kpi .delta.flat, .kpi .delta.na { color: var(--text-muted); }
+.kpi .note { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.card h2 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.card .sub { margin: 2px 0 10px; font-size: 12px; color: var(--text-muted); }
+.card .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; flex-wrap: wrap; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin: 0 0 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.legend i.line { height: 3px; border-radius: 2px; width: 16px; }
+.chart { position: relative; height: 260px; }
+.chart.short { height: 220px; }
+.chart.tall { height: 380px; }
+details.data { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+details.data summary { cursor: pointer; color: var(--text-muted); }
+details.data table { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+details.data th, details.data td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); }
+details.data th:first-child, details.data td:first-child { text-align: left; }
+details.data .scroll { max-height: 220px; overflow: auto; }
+
+.rank { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 8px; }
+.rank th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: 600; text-align: right; padding: 6px; border-bottom: 1px solid var(--border); }
+.rank td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--grid); }
+.rank th:nth-child(-n+2), .rank td:nth-child(-n+2) { text-align: left; }
+.rank .pos { font-weight: 700; font-size: 16px; width: 36px; }
+.rank .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: 0; }
+select.inline { font: 500 12.5px Inter, system-ui, sans-serif; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; }
+
+.goal { display: flex; flex-direction: column; gap: 4px; }
+.goal .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; width: fit-content; }
+.badge.good { color: var(--good-text); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.badge.bad  { color: var(--critical-text); background: color-mix(in srgb, var(--critical) 14%, transparent); }
+.bar-track { height: 10px; background: var(--grid); border-radius: 6px; position: relative; margin: 10px 0 4px; }
+.bar-fill { height: 100%; background: var(--series-1); border-radius: 6px; }
+.bar-target { position: absolute; top: -4px; width: 2px; height: 18px; background: var(--text-primary); }
+.goal small { color: var(--text-muted); font-size: 12px; }
+
+.findings ul { margin: 8px 0 0; padding-left: 18px; }
+.findings li { margin: 6px 0; color: var(--text-secondary); }
+.findings li b { color: var(--text-primary); }
+
+footer { font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
+footer code { font-size: 11.5px; }
+.loading { padding: 60px 0; text-align: center; color: var(--text-muted); }
+.err { color: var(--critical-text); }
+.dim { opacity: .55; transition: opacity .15s; }
+
+@media (min-width: 961px) { .filters { position: sticky; top: 0; z-index: 5; } }
+@media (max-width: 960px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .kpi .value { font-size: 26px; }
+  .filters select { min-width: 0; width: 100%; }
+  .filters label { flex: 1 1 140px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>EcoBottle AR — Tablero Comercial</h1>
+    <p id="snapshot">Datos al 30/09/2025 · fuente: data warehouse (<code>dw/</code>)</p>
+  </div>
+</header>
+
+<div class="filters" role="region" aria-label="Filtros">
+  <div class="wrap">
+    <label>Desde <select id="f-from"></select></label>
+    <label>Hasta <select id="f-to"></select></label>
+    <div class="presets" aria-label="Períodos rápidos">
+      <button data-preset="3">Últ. 3 meses</button>
+      <button data-preset="12">Últ. 12 meses</button>
+      <button data-preset="all">Todo</button>
+    </div>
+    <label>Canal <select id="f-ch"></select></label>
+    <label>Provincia <select id="f-prov"></select></label>
+    <label>Producto <select id="f-prod"></select></label>
+    <button id="f-reset" title="Quitar todos los filtros">Limpiar</button>
+  </div>
+</div>
+
+<main class="wrap" id="app">
+  <div class="loading" id="loading">Cargando tablas del data warehouse…</div>
+
+  <section class="kpis" id="kpis" hidden>
+    <div class="card kpi"><div class="label">Total Ventas</div><div class="value" id="k-sales">–</div><div class="delta" id="d-sales"></div><div class="note">Pedidos pagados o entregados · con IVA y envío</div></div>
+    <div class="card kpi"><div class="label">Usuarios Activos</div><div class="value" id="k-users">–</div><div class="delta" id="d-users"></div><div class="note" id="n-users">Visitantes únicos de la web</div></div>
+    <div class="card kpi"><div class="label">Ticket Promedio</div><div class="value" id="k-ticket">–</div><div class="delta" id="d-ticket"></div><div class="note">Ventas ÷ cantidad de pedidos</div></div>
+    <div class="card kpi"><div class="label">NPS</div><div class="value" id="k-nps">–</div><div class="delta" id="d-nps"></div><div class="note" id="n-nps">% promotores − % detractores</div></div>
+  </section>
+
+  <div id="content" hidden>
+    <section class="grid2">
+      <div class="card">
+        <h2>Ventas por mes</h2>
+        <p class="sub">Millones de pesos · pedidos PAID + FULFILLED</p>
+        <div class="legend" id="lg-sales"></div>
+        <div class="chart"><canvas id="c-sales" aria-label="Ventas por mes"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-sales"></div></details>
+      </div>
+      <div class="card">
+        <h2>Usuarios activos por mes</h2>
+        <p class="sub" id="s-users">Miles de usuarios únicos (cliente logueado o sesión anónima)</p>
+        <div class="chart"><canvas id="c-users" aria-label="Usuarios activos por mes"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-users"></div></details>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Ventas por provincia</h2>
+        <p class="sub">Millones de pesos y participación · provincia de la dirección de envío</p>
+        <div class="chart tall"><canvas id="c-prov" aria-label="Ventas por provincia"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-prov"></div></details>
+      </div>
+      <div class="card">
+        <div class="head">
+          <div>
+            <h2>Ranking mensual por producto</h2>
+            <p class="sub">Ventas netas (line_total, sin IVA) · millones de pesos</p>
+          </div>
+          <label style="font-size:12px;color:var(--text-secondary)">Top N
+            <select class="inline" id="f-topn"><option value="1">1</option><option value="2" selected>2</option></select>
+          </label>
+        </div>
+        <div class="legend" id="lg-rank"></div>
+        <div class="chart short"><canvas id="c-rank" aria-label="Ventas por producto y mes"></canvas></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;flex-wrap:wrap">
+          <b style="font-size:13px">Ranking del mes</b>
+          <select class="inline" id="f-rank-month"></select>
+        </div>
+        <table class="rank" id="t-rank"></table>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Tendencia del NPS</h2>
+        <p class="sub">Puntos NPS por mes y canal (−100 a +100)</p>
+        <div class="legend" id="lg-nps"></div>
+        <div class="chart"><canvas id="c-nps" aria-label="NPS por mes"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-nps"></div></details>
+      </div>
+      <div class="card">
+        <h2>Ticket promedio por mes</h2>
+        <p class="sub">Miles de pesos por pedido</p>
+        <div class="chart"><canvas id="c-ticket" aria-label="Ticket promedio por mes"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-ticket"></div></details>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h2>Meta: crecer 15 % las ventas en Córdoba</h2>
+        <p class="sub">Último trimestre con datos vs. el mismo trimestre del año anterior · respeta canal y producto</p>
+        <div class="goal" id="goal-cba"></div>
+      </div>
+      <div class="card">
+        <h2>Meta: reducir tiempos de entrega en Mendoza</h2>
+        <p class="sub">Días promedio del pedido a la entrega, por trimestre · envíos por correo entregados</p>
+        <div class="legend" id="lg-ship"></div>
+        <div class="chart short"><canvas id="c-ship" aria-label="Días de entrega por provincia"></canvas></div>
+        <details class="data"><summary>Ver datos</summary><div class="scroll" id="t-ship"></div></details>
+      </div>
+    </section>
+
+    <section class="card findings" style="margin-bottom:14px">
+      <h2>Hallazgos e ideas</h2>
+      <ul>
+        <li><b>El NPS online se desplomó en jul–sep 2024</b> (de +29 en junio a −27 en agosto) justo cuando los días de entrega subieron ~2,5 días en todas las provincias. Al normalizarse la logística, el NPS volvió a +30. La entrega es la palanca principal de satisfacción online.</li>
+        <li><b>Las tiendas físicas tienen mejor NPS que la web</b> (+41 vs +24 en todo el período) y casi no tienen cancelaciones (1,2 % vs 8,3 % online).</li>
+        <li><b>Córdoba ya superó la meta:</b> en el T3 2025 vendió +25 % contra el T3 2024 (meta +15 %), aunque cae −5 % contra el T2 2025: conviene sostenerla.</li>
+        <li><b>Mendoza no es la provincia más lenta:</b> en el T3 2025 tarda 5,3 días, menos que Córdoba (5,5). Buenos Aires tarda 3,4. Si la meta es logística, Córdoba también necesita atención.</li>
+        <li><b>Mercado Pago tiene 9,8 % de pagos fallidos</b> (tarjeta 4 %). Revisar la integración de la pasarela podría recuperar ventas online.</li>
+        <li><b>Diciembre es el pico del año</b> (ventas y usuarios activos). Sport B lidera en verano (dic–feb) y en junio, mientras Classic A gana en invierno (jul–sep): conviene planificar stock y campañas por temporada.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <b>Fuentes:</b> data warehouse de EcoBottle AR generado con <code>run_sql.py</code> —
+      <code>dw/fact_orders.csv</code>, <code>dw/fact_sales.csv</code>, <code>dw/fact_web_sessions.csv</code>,
+      <code>dw/fact_nps.csv</code>, <code>dw/fact_shipments.csv</code> y dimensiones <code>dw/dim_*.csv</code>.
+      Los filtros que no aplican a un indicador se aclaran en su tarjeta.
+    </footer>
+  </div>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const DW = '../dw/';
+  const MONTHS_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const nf0 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
+  const nf1 = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const nf2 = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const ymLabel = (ym) => `${MONTHS_ES[(ym % 100) - 1]} ${String(Math.floor(ym / 100)).slice(2)}`;
+  const ymLong  = (ym) => `${MONTHS_ES[(ym % 100) - 1]} ${Math.floor(ym / 100)}`;
+  const quarterOf = (ym) => `${Math.floor(ym / 100)}-T${Math.ceil((ym % 100) / 3)}`;
+  const $ = (id) => document.getElementById(id);
+
+  function load(name) {
+    return new Promise((resolve, reject) => {
+      Papa.parse(DW + name + '.csv', {
+        download: true, header: true, dynamicTyping: true, skipEmptyLines: true,
+        complete: (r) => resolve(r.data), error: reject,
+      });
+    });
+  }
+
+  const S = { months: [], channels: [], provinces: [], products: [] };
+  let D = {};
+  const charts = {};
+  const F = { from: null, to: null, ch: 'all', prov: 'all', prod: 'all', topn: 2, rankMonth: null };
+
+  Promise.all(['dim_channel','dim_province','dim_product','fact_orders','fact_sales',
+               'fact_web_sessions','fact_nps','fact_shipments'].map(load))
+    .then(([ch, prov, prod, orders, sales, sessions, nps, ships]) => {
+      S.channels = ch; S.provinces = prov; S.products = prod;
+      const ym = (dk) => Math.floor(dk / 100);
+      D.orders = orders.filter(o => o.is_sale === true).map(o => ({ ym: ym(o.date_key), ch: o.channel_key, prov: o.province_key, total: +o.total_amount }));
+      D.lines = sales.filter(s => s.is_sale === true).map(s => ({ ym: ym(s.date_key), ch: s.channel_key, prov: s.province_key, prod: s.product_key, order: s.order_id, line: +s.line_total, alloc: +s.total_amount_allocated, qty: s.quantity }));
+      D.sessions = sessions.map(w => ({ ym: ym(w.date_key), ch: w.channel_key, uid: w.active_user_id }));
+      D.nps = nps.map(n => ({ ym: ym(n.date_key), ch: n.channel_key, pts: n.nps_points }));
+      D.ships = ships.filter(s => s.is_delivered === true).map(s => ({ ym: ym(s.order_date_key), ch: s.channel_key, prov: s.province_key, days: +s.days_to_deliver }));
+      const set = new Set(D.orders.map(o => o.ym));
+      S.months = [...set].sort((a, b) => a - b);
+      initFilters();
+      $('loading').remove();
+      $('kpis').hidden = false; $('content').hidden = false;
+      render();
+    })
+    .catch(err => {
+      $('loading').innerHTML = '<span class="err">No se pudieron leer los CSV de <code>dw/</code>.</span><br>Abrí el tablero desde GitHub Pages o con un servidor local (<code>python -m http.server</code> en la raíz del repo).';
+      console.error(err);
+    });
+
+  // ------------------------------------------------------------------ filtros
+  function opt(sel, value, text) { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); }
+  function initFilters() {
+    for (const m of S.months) { opt($('f-from'), m, ymLong(m)); opt($('f-to'), m, ymLong(m)); }
+    opt($('f-ch'), 'all', 'Todos'); S.channels.forEach(c => opt($('f-ch'), c.channel_key, c.name));
+    opt($('f-prov'), 'all', 'Todas'); S.provinces.forEach(p => opt($('f-prov'), p.province_key, p.name));
+    opt($('f-prod'), 'all', 'Todos'); S.products.forEach(p => opt($('f-prod'), p.product_key, p.name));
+    resetFilters(false);
+    $('f-from').onchange = () => { F.from = +$('f-from').value; if (F.from > F.to) { F.to = F.from; $('f-to').value = F.to; } F.rankMonth = null; markPreset(); render(); };
+    $('f-to').onchange   = () => { F.to = +$('f-to').value; if (F.to < F.from) { F.from = F.to; $('f-from').value = F.from; } F.rankMonth = null; markPreset(); render(); };
+    $('f-ch').onchange   = () => { F.ch = val($('f-ch')); render(); };
+    $('f-prov').onchange = () => { F.prov = val($('f-prov')); render(); };
+    $('f-prod').onchange = () => { F.prod = val($('f-prod')); render(); };
+    $('f-topn').onchange = () => { F.topn = +$('f-topn').value; render(); };
+    $('f-rank-month').onchange = () => { F.rankMonth = +$('f-rank-month').value; renderRankTable(); };
+    $('f-reset').onclick = () => resetFilters(true);
+    document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
+      const p = b.dataset.preset, last = S.months.length - 1;
+      F.to = S.months[last];
+      F.from = p === 'all' ? S.months[0] : S.months[Math.max(0, last - (+p) + 1)];
+      $('f-from').value = F.from; $('f-to').value = F.to; F.rankMonth = null; markPreset(); render();
+    });
+  }
+  const val = (sel) => sel.value === 'all' ? 'all' : +sel.value;
+  function resetFilters(doRender) {
+    F.from = S.months[0]; F.to = S.months[S.months.length - 1];
+    F.ch = F.prov = F.prod = 'all'; F.rankMonth = null;
+    $('f-from').value = F.from; $('f-to').value = F.to;
+    $('f-ch').value = $('f-prov').value = $('f-prod').value = 'all';
+    markPreset();
+    if (doRender) render();
+  }
+  function markPreset() {
+    const n = S.months.indexOf(F.to) - S.months.indexOf(F.from) + 1;
+    const isLast = F.to === S.months[S.months.length - 1];
+    document.querySelectorAll('[data-preset]').forEach(b => {
+      const p = b.dataset.preset;
+      b.classList.toggle('on', isLast && (p === 'all' ? n === S.months.length : n === +p));
+    });
+  }
+  const inRange = (ym, a, b) => ym >= a && ym <= b;
+  const okCh = (c) => F.ch === 'all' || c === F.ch;
+  const okProv = (p) => F.prov === 'all' || p === F.prov;
+  const okProd = (p) => F.prod === 'all' || p === F.prod;
+  const monthsIn = (a, b) => S.months.filter(m => inRange(m, a, b));
+  function prevRange() {
+    const i = S.months.indexOf(F.from), j = S.months.indexOf(F.to), n = j - i + 1;
+    if (i - n < 0) return null;
+    return [S.months[i - n], S.months[i - 1]];
+  }
+  const onlineKey = () => (S.channels.find(c => c.code === 'ONLINE') || {}).channel_key;
+
+  // ------------------------------------------------------------------ métricas
+  // Ventas y ticket: sin filtro de producto se usa fact_orders (SUM(total_amount) / COUNT(*)).
+  // Con filtro de producto se usa fact_sales.total_amount_allocated (el total del pedido
+  // repartido entre sus líneas) y se cuentan los pedidos distintos que tienen ese producto.
+  function salesAgg(a, b, opts = {}) {
+    const useProv = opts.ignoreProv ? () => true : okProv;
+    if (F.prod === 'all') {
+      let s = 0, n = 0;
+      for (const o of D.orders) if (inRange(o.ym, a, b) && okCh(o.ch) && useProv(o.prov)) { s += o.total; n++; }
+      return { sales: s, orders: n };
+    }
+    let s = 0; const ids = new Set();
+    for (const l of D.lines) if (inRange(l.ym, a, b) && okCh(l.ch) && useProv(l.prov) && okProd(l.prod)) { s += l.alloc; ids.add(l.order); }
+    return { sales: s, orders: ids.size };
+  }
+  const usersApply = () => F.ch === 'all' || F.ch === onlineKey();
+  function usersAgg(a, b) {
+    if (!usersApply()) return null;
+    const u = new Set();
+    for (const w of D.sessions) if (inRange(w.ym, a, b)) u.add(w.uid);
+    return u.size;
+  }
+  function npsAgg(a, b, ch = F.ch) {
+    let s = 0, n = 0;
+    for (const r of D.nps) if (inRange(r.ym, a, b) && (ch === 'all' || r.ch === ch)) { s += r.pts; n++; }
+    return n ? s / n : null;
+  }
+
+  // ------------------------------------------------------------------ render
+  function render() {
+    renderKpis();
+    renderSalesSeries();
+    renderUsersSeries();
+    renderProvinces();
+    renderRanking();
+    renderNps();
+    renderTicket();
+    renderGoalCba();
+    renderShipping();
+  }
+
+  function delta(el, cur, prev, kind) {
+    el.className = 'delta';
+    el.textContent = '';
+    if (cur == null) { el.classList.add('na'); return; }
+    if (prev == null || (kind !== 'pts' && !prev)) { el.classList.add('na'); el.textContent = 'Sin datos del período anterior'; return; }
+    const d = kind === 'pts' ? cur - prev : (cur / prev - 1) * 100;
+    const flat = Math.abs(d) < 0.05;
+    el.classList.add(flat ? 'flat' : d > 0 ? 'up' : 'down');
+    const arrow = flat ? '→' : d > 0 ? '▲' : '▼';
+    const txt = kind === 'pts' ? `${d > 0 ? '+' : ''}${nf1.format(d)} pts` : `${d > 0 ? '+' : ''}${nf1.format(d)} %`;
+    el.textContent = `${arrow} ${txt} vs. período anterior`;
+    el.title = 'Período anterior: los mismos meses inmediatamente antes del rango elegido';
+  }
+
+  function renderKpis() {
+    const cur = salesAgg(F.from, F.to);
+    const pr = prevRange();
+    const prv = pr ? salesAgg(pr[0], pr[1]) : null;
+    $('k-sales').textContent = `$${nf1.format(cur.sales / 1e6)} M`;
+    delta($('d-sales'), cur.sales, prv && prv.sales);
+    const t = cur.orders ? cur.sales / cur.orders : null, tp = prv && prv.orders ? prv.sales / prv.orders : null;
+    $('k-ticket').textContent = t == null ? '–' : `$${nf1.format(t / 1e3)} K`;
+    delta($('d-ticket'), t, tp);
+
+    const u = usersAgg(F.from, F.to);
+    const up = pr ? usersAgg(pr[0], pr[1]) : null;
+    $('k-users').textContent = u == null ? 'No aplica' : `${nf1.format(u / 1e3)} K`;
+    delta($('d-users'), u, up);
+    const uNotes = [];
+    if (!usersApply()) uNotes.push('Las sesiones web son del canal online');
+    else { if (F.prov !== 'all') uNotes.push('no se filtra por provincia'); if (F.prod !== 'all') uNotes.push('no se filtra por producto'); }
+    $('n-users').textContent = uNotes.length ? (usersApply() ? 'Visitantes únicos · ' : '') + uNotes.join(' y ') : 'Visitantes únicos de la web';
+
+    const n = npsAgg(F.from, F.to), np = pr ? npsAgg(pr[0], pr[1]) : null;
+    $('k-nps').textContent = n == null ? '–' : `${n > 0 ? '+' : ''}${nf1.format(n)} pts`;
+    delta($('d-nps'), n, np, 'pts');
+    $('n-nps').textContent = (F.prov !== 'all' || F.prod !== 'all')
+      ? '% promotores − % detractores · la encuesta no registra provincia ni producto'
+      : '% promotores − % detractores';
+  }
+
+  // Opciones comunes de Chart.js, leídas de los tokens del tema
+  function baseOptions(yTitleFmt, extra = {}) {
+    const text2 = css('--text-secondary'), grid = css('--grid'), muted = css('--text-muted');
+    return Object.assign({
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: css('--surface-1'), titleColor: css('--text-secondary'), bodyColor: css('--text-primary'),
+          borderColor: css('--border'), borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+          bodyFont: { weight: '600' },
+          callbacks: { label: (c) => ` ${yTitleFmt(c.parsed.y ?? c.parsed.x)}  ${c.dataset.label}` },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: muted, maxRotation: 0, autoSkipPadding: 10, font: { size: 11 } }, border: { color: grid } },
+        y: { grid: { color: grid }, border: { display: false }, ticks: { color: muted, font: { size: 11 }, callback: (v) => yTitleFmt(v) } },
+      },
+    }, extra);
+  }
+  function upsert(id, config) {
+    if (charts[id]) { charts[id].destroy(); }
+    charts[id] = new Chart($(id), config);
+  }
+  function legend(id, items, kind = 'box') {
+    const el = $(id); el.textContent = '';
+    for (const it of items) {
+      const s = document.createElement('span'); const i = document.createElement('i');
+      if (kind === 'line') i.className = 'line';
+      i.style.background = it.color; s.appendChild(i); s.appendChild(document.createTextNode(it.label)); el.appendChild(s);
+    }
+  }
+  function table(id, headers, rows) {
+    const el = $(id); el.textContent = '';
+    const t = document.createElement('table'); const thead = t.createTHead(); const hr = thead.insertRow();
+    headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+    const tb = t.createTBody();
+    rows.forEach(r => { const tr = tb.insertRow(); r.forEach(c => { tr.insertCell().textContent = c; }); });
+    el.appendChild(t);
+  }
+  const line = (label, data, color, extra = {}) => Object.assign({
+    label, data, borderColor: color, backgroundColor: color, borderWidth: 2, cubicInterpolationMode: 'monotone',
+    pointRadius: 0, pointHoverRadius: 5, pointHoverBorderWidth: 2, pointHoverBorderColor: css('--surface-1'), spanGaps: true,
+  }, extra);
+
+  function renderSalesSeries() {
+    const ms = monthsIn(F.from, F.to);
+    const byCh = F.ch === 'all';
+    const series = byCh ? S.channels.map((c, i) => ({ c, color: css(i === 0 ? '--series-1' : '--series-2') })) : null;
+    const total = ms.map(m => salesAgg(m, m).sales / 1e6);
+    let datasets;
+    if (byCh) {
+      const keep = F.ch; datasets = series.map(({ c, color }) => {
+        F.ch = c.channel_key; const d = ms.map(m => salesAgg(m, m).sales / 1e6); F.ch = keep;
+        return line(c.name, d, color);
+      });
+      legend('lg-sales', series.map(s => ({ label: s.c.name, color: s.color })), 'line');
+    } else {
+      datasets = [line('Ventas', total, css('--series-1'))];
+      $('lg-sales').textContent = '';
+    }
+    upsert('c-sales', { type: 'line', data: { labels: ms.map(ymLabel), datasets }, options: baseOptions(v => `$${nf1.format(v)} M`) });
+    const headers = byCh ? ['Mes', ...series.map(s => s.c.name), 'Total ($M)'] : ['Mes', 'Ventas ($M)'];
+    table('t-sales', headers, ms.map((m, i) => byCh ? [ymLong(m), ...datasets.map(d => nf2.format(d.data[i])), nf2.format(total[i])] : [ymLong(m), nf2.format(total[i])]));
+  }
+
+  function renderUsersSeries() {
+    const ms = monthsIn(F.from, F.to);
+    const ok = usersApply();
+    const data = ms.map(m => { const u = ok ? usersAgg(m, m) : null; return u == null ? null : u / 1e3; });
+    $('s-users').textContent = ok ? 'Miles de usuarios únicos (cliente logueado o sesión anónima)' : 'No aplica: las sesiones web pertenecen al canal online';
+    upsert('c-users', { type: 'line', data: { labels: ms.map(ymLabel), datasets: [line('Usuarios activos', data, css('--series-1'))] }, options: baseOptions(v => `${nf1.format(v)} K`) });
+    table('t-users', ['Mes', 'Usuarios activos'], ms.map((m, i) => [ymLong(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
+  }
+
+  function renderProvinces() {
+    const rows = S.provinces.map(p => {
+      const keep = F.prov; F.prov = p.province_key; const v = salesAgg(F.from, F.to).sales; F.prov = keep;
+      return { p, v };
+    }).sort((a, b) => b.v - a.v);
+    const tot = rows.reduce((s, r) => s + r.v, 0) || 1;
+    const c1 = css('--series-1'), mut = css('--muted-mark');
+    const colors = rows.map(r => F.prov === 'all' || F.prov === r.p.province_key ? c1 : mut);
+    upsert('c-prov', {
+      type: 'bar',
+      data: { labels: rows.map(r => r.p.name), datasets: [{ label: 'Ventas', data: rows.map(r => r.v / 1e6), backgroundColor: colors, borderRadius: 4, borderSkipped: 'start', barPercentage: 0.7, categoryPercentage: 0.85, maxBarThickness: 36 }] },
+      options: Object.assign(baseOptions(v => `$${nf1.format(v)} M`, { indexAxis: 'y', interaction: { mode: 'nearest', intersect: true, axis: 'y' } }), {}),
+      plugins: [{
+        id: 'pct', afterDatasetsDraw(chart) {
+          const { ctx } = chart; const meta = chart.getDatasetMeta(0);
+          ctx.save(); ctx.font = '600 12px Inter, system-ui, sans-serif'; ctx.fillStyle = css('--text-primary'); ctx.textBaseline = 'middle';
+          meta.data.forEach((bar, i) => {
+            const txt = `${nf1.format(rows[i].v / tot * 100)} %`;
+            const w = ctx.measureText(txt).width;
+            const inside = bar.x - chart.chartArea.left > w + 16;
+            const hl = F.prov === 'all' || F.prov === rows[i].p.province_key;
+            ctx.fillStyle = inside && hl ? '#ffffff' : css('--text-primary');
+            ctx.textAlign = inside ? 'right' : 'left';
+            ctx.fillText(txt, inside ? bar.x - 8 : bar.x + 6, bar.y);
+          });
+          ctx.restore();
+        },
+      }],
+    });
+    const o = charts['c-prov'].options;
+    o.scales.x.grid = { color: css('--grid') }; o.scales.x.ticks.callback = (v) => `$${nf0.format(v)} M`;
+    o.scales.y.grid = { display: false }; o.scales.y.ticks.callback = function (v) { return this.getLabelForValue(v); };
+    o.scales.y.ticks.color = css('--text-secondary'); o.scales.y.ticks.font = { size: 12, weight: '500' };
+    o.plugins.tooltip.callbacks.label = (c) => ` $${nf2.format(c.parsed.x)} M · ${nf1.format(rows[c.dataIndex].v / tot * 100)} %`;
+    charts['c-prov'].update('none');
+    table('t-prov', ['Provincia', 'Ventas ($M)', 'Participación'], rows.map(r => [r.p.name, nf2.format(r.v / 1e6), `${nf1.format(r.v / tot * 100)} %`]));
+  }
+
+  // Ranking: SUM(line_total) por producto y mes (respeta fecha, canal y provincia)
+  function productMonth() {
+    const ms = monthsIn(F.from, F.to); const idx = new Map(ms.map((m, i) => [m, i]));
+    const by = new Map(S.products.map(p => [p.product_key, { p, net: ms.map(() => 0), qty: ms.map(() => 0) }]));
+    for (const l of D.lines) {
+      if (!idx.has(l.ym) || !okCh(l.ch) || !okProv(l.prov)) continue;
+      const r = by.get(l.prod); const i = idx.get(l.ym); r.net[i] += l.line; r.qty[i] += l.qty;
+    }
+    return { ms, rows: [...by.values()] };
+  }
+  const prodColor = (key) => css(S.products.findIndex(p => p.product_key === key) === 0 ? '--series-1' : '--series-2');
+  function renderRanking() {
+    const { ms, rows } = productMonth();
+    const total = (r) => r.net.reduce((a, b) => a + b, 0);
+    const top = [...rows].sort((a, b) => total(b) - total(a)).slice(0, F.topn);
+    const shown = top.filter(r => okProd(r.p.product_key) || F.prod === 'all');
+    const list = shown.length ? shown : top;
+    upsert('c-rank', {
+      type: 'bar',
+      data: { labels: ms.map(ymLabel), datasets: list.map(r => ({ label: r.p.name, data: r.net.map(v => v / 1e6), backgroundColor: prodColor(r.p.product_key), borderRadius: 4, borderSkipped: 'start', barPercentage: 0.8, categoryPercentage: 0.75 })) },
+      options: baseOptions(v => `$${nf1.format(v)} M`),
+    });
+    legend('lg-rank', list.map(r => ({ label: r.p.name, color: prodColor(r.p.product_key) })));
+    const sel = $('f-rank-month'); sel.textContent = '';
+    [...ms].reverse().forEach(m => opt(sel, m, ymLong(m)));
+    if (!F.rankMonth || !ms.includes(F.rankMonth)) F.rankMonth = ms[ms.length - 1];
+    sel.value = F.rankMonth;
+    renderRankTable();
+  }
+  function renderRankTable() {
+    const { ms, rows } = productMonth();
+    const i = ms.indexOf(F.rankMonth);
+    const ranked = rows.map(r => ({ r, net: r.net[i], qty: r.qty[i], prev: i > 0 ? r.net[i - 1] : null }))
+      .sort((a, b) => b.net - a.net).slice(0, F.topn);
+    const t = $('t-rank'); t.textContent = '';
+    const h = t.createTHead().insertRow();
+    ['#', 'Producto', 'Unidades', 'Ventas netas', 'vs. mes ant.'].forEach(x => { const th = document.createElement('th'); th.textContent = x; h.appendChild(th); });
+    const tb = t.createTBody();
+    ranked.forEach((x, k) => {
+      const tr = tb.insertRow();
+      const c0 = tr.insertCell(); c0.className = 'pos'; c0.textContent = k + 1;
+      const c1 = tr.insertCell(); const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = prodColor(x.r.p.product_key); c1.appendChild(sw); c1.appendChild(document.createTextNode(x.r.p.name));
+      tr.insertCell().textContent = nf0.format(x.qty);
+      tr.insertCell().textContent = `$${nf2.format(x.net / 1e6)} M`;
+      const c4 = tr.insertCell();
+      if (x.prev) { const d = (x.net / x.prev - 1) * 100; c4.textContent = `${d > 0 ? '▲ +' : '▼ '}${nf1.format(d)} %`; c4.style.color = css(d >= 0 ? '--good-text' : '--critical-text'); }
+      else c4.textContent = '–';
+    });
+  }
+
+  function renderNps() {
+    const ms = monthsIn(F.from, F.to);
+    const chs = F.ch === 'all' ? S.channels : S.channels.filter(c => c.channel_key === F.ch);
+    const ds = chs.map(c => {
+      const color = css(S.channels.indexOf(c) === 0 ? '--series-1' : '--series-2');
+      return line(c.name, ms.map(m => npsAgg(m, m, c.channel_key)), color);
+    });
+    const opts = baseOptions(v => `${v > 0 ? '+' : ''}${nf0.format(v)}`);
+    opts.scales.y.suggestedMin = -40; opts.scales.y.suggestedMax = 60;
+    opts.scales.y.grid = { color: (c) => c.tick && c.tick.value === 0 ? css('--text-muted') : css('--grid') };
+    opts.plugins.tooltip.callbacks.label = (c) => c.parsed.y == null ? ` sin respuestas  ${c.dataset.label}` : ` ${c.parsed.y > 0 ? '+' : ''}${nf1.format(c.parsed.y)} pts  ${c.dataset.label}`;
+    upsert('c-nps', { type: 'line', data: { labels: ms.map(ymLabel), datasets: ds }, options: opts });
+    legend('lg-nps', ds.map(d => ({ label: d.label, color: d.borderColor })), 'line');
+    table('t-nps', ['Mes', ...ds.map(d => d.label)], ms.map((m, i) => [ymLong(m), ...ds.map(d => d.data[i] == null ? '–' : nf1.format(d.data[i]))]));
+  }
+
+  function renderTicket() {
+    const ms = monthsIn(F.from, F.to);
+    const data = ms.map(m => { const a = salesAgg(m, m); return a.orders ? a.sales / a.orders / 1e3 : null; });
+    const opts = baseOptions(v => `$${nf1.format(v)} K`);
+    upsert('c-ticket', { type: 'line', data: { labels: ms.map(ymLabel), datasets: [line('Ticket promedio', data, css('--series-1'))] }, options: opts });
+    table('t-ticket', ['Mes', 'Ticket promedio ($)'], ms.map((m, i) => [ymLong(m), data[i] == null ? '–' : nf0.format(data[i] * 1e3)]));
+  }
+
+  function renderGoalCba() {
+    const cba = S.provinces.find(p => p.code === 'CBA');
+    const last = S.months[S.months.length - 1];
+    const q = quarterOf(last);
+    const qMonths = S.months.filter(m => quarterOf(m) === q);
+    const prevYear = qMonths.map(m => m - 100);
+    const keep = F.prov; F.prov = cba.province_key;
+    const cur = salesAgg(qMonths[0], qMonths[qMonths.length - 1]).sales;
+    const ly = salesAgg(prevYear[0], prevYear[prevYear.length - 1]).sales;
+    const pqM = S.months.filter(m => quarterOf(m) === quarterOf(qMonths[0] - (qMonths[0] % 100 <= 3 ? 91 : 3)));
+    const pq = pqM.length ? salesAgg(pqM[0], pqM[pqM.length - 1]).sales : null;
+    F.prov = keep;
+    const g = ly ? (cur / ly - 1) * 100 : null, target = 15;
+    const el = $('goal-cba'); el.textContent = '';
+    const big = document.createElement('div'); big.className = 'big';
+    big.textContent = g == null ? '–' : `${g > 0 ? '+' : ''}${nf1.format(g)} %`;
+    const badge = document.createElement('span');
+    const okGoal = g != null && g >= target;
+    badge.className = 'badge ' + (okGoal ? 'good' : 'bad');
+    badge.textContent = okGoal ? '✓ Meta cumplida (+15 %)' : '✕ Por debajo de la meta (+15 %)';
+    const track = document.createElement('div'); track.className = 'bar-track';
+    const max = Math.max(30, (g || 0) + 5);
+    const fill = document.createElement('div'); fill.className = 'bar-fill'; fill.style.width = `${Math.max(0, Math.min(100, (g || 0) / max * 100))}%`;
+    const tgt = document.createElement('div'); tgt.className = 'bar-target'; tgt.style.left = `${target / max * 100}%`; tgt.title = 'Meta +15 %';
+    track.append(fill, tgt);
+    const s1 = document.createElement('small');
+    s1.textContent = `${q.replace('-T', ' T')}: $${nf1.format(cur / 1e6)} M vs. $${nf1.format(ly / 1e6)} M en el mismo trimestre de ${Math.floor(prevYear[0] / 100)}.`;
+    const s2 = document.createElement('small');
+    if (pq) { const d = (cur / pq - 1) * 100; s2.textContent = `Contra el trimestre anterior: ${d > 0 ? '+' : ''}${nf1.format(d)} %. La línea negra marca la meta.`; }
+    el.append(big, badge, track, s1, s2);
+  }
+
+  function renderShipping() {
+    const qs = [...new Set(S.months.filter(m => inRange(m, F.from, F.to)).map(quarterOf))];
+    const mza = S.provinces.find(p => p.code === 'MZA');
+    const ds = S.provinces.map(p => {
+      const data = qs.map(q => {
+        let s = 0, n = 0;
+        for (const x of D.ships) if (x.prov === p.province_key && quarterOf(x.ym) === q && inRange(x.ym, F.from, F.to) && okCh(x.ch)) { s += x.days; n++; }
+        return n ? s / n : null;
+      });
+      const hl = p.province_key === mza.province_key || p.province_key === F.prov;
+      return line(p.name, data, hl ? css('--series-2') : css('--muted-mark'), { borderWidth: hl ? 2.5 : 1.5, order: hl ? 0 : 1, pointRadius: hl ? 3 : 0 });
+    });
+    const opts = baseOptions(v => `${nf1.format(v)} d`);
+    opts.plugins.tooltip.itemSort = (a, b) => b.parsed.y - a.parsed.y;
+    upsert('c-ship', { type: 'line', data: { labels: qs.map(q => q.replace('-T', ' T')), datasets: ds }, options: opts });
+    legend('lg-ship', [{ label: 'Mendoza' + (F.prov !== 'all' && F.prov !== mza.province_key ? ' y ' + S.provinces.find(p => p.province_key === F.prov).name : ''), color: css('--series-2') }, { label: 'Resto de las provincias', color: css('--muted-mark') }], 'line');
+    table('t-ship', ['Trimestre', ...ds.map(d => d.label)], qs.map((q, i) => [q, ...ds.map(d => d.data[i] == null ? '–' : nf2.format(d.data[i]))]));
+  }
+
+  // Re-render si cambia el tema del sistema (los colores salen de los tokens CSS)
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (D.orders) render(); });
+})();
+</script>
+</body>
+</html>
