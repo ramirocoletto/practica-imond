@@ -24,8 +24,12 @@
 --   * Se cargan TODOS los pedidos (también cancelados, reembolsados, etc.)
 --     y is_sale (copiado de dim_order_status) marca los PAID y FULFILLED.
 --   * La provincia de un pedido es la de su dirección de ENVÍO
---     (shipping_address_id -> address.province_id). En compras en tienda la
---     dirección de envío es la de la tienda.
+--     (shipping_address_id -> address.province_id). En la mayoría de las
+--     compras en tienda la dirección de envío es la de la tienda; cuando la
+--     tienda manda el pedido a domicilio es la del cliente (siempre en la
+--     misma provincia de la tienda, en estos datos).
+--   * Todas las uniones con dimensiones son LEFT JOIN + COALESCE(clave, -1):
+--     un dato que falte o no exista en su dimensión nunca hace perder la fila.
 -- =====================================================================
 
 
@@ -74,11 +78,11 @@ FROM (
         i.order_item_id,
         i.order_id,
         CAST(strftime(o.order_date, '%Y%m%d') AS INTEGER)              AS date_key,
-        dp.product_key,
+        COALESCE(dp.product_key, -1)                                   AS product_key,
         COALESCE(dc.customer_key, -1)                                  AS customer_key,
-        ch.channel_key,
+        COALESCE(ch.channel_key, -1)                                   AS channel_key,
         COALESCE(ds.store_key, -1)                                     AS store_key,
-        pr.province_key,
+        COALESCE(pr.province_key, -1)                                  AS province_key,
         COALESCE(da.address_key, -1)                                   AS shipping_address_key,
         COALESCE(st.status_key, -1)                                    AS status_key,
         COALESCE(st.is_sale, FALSE)                                    AS is_sale,
@@ -91,10 +95,10 @@ FROM (
         CAST(ROUND(o.total_amount * i.line_total / NULLIF(o.subtotal, 0), 2) AS DECIMAL(12, 2)) AS alloc_round
     FROM raw.sales_order_item   AS i
     JOIN raw.sales_order        AS o  ON o.order_id     = i.order_id
-    JOIN raw.address            AS a  ON a.address_id   = o.shipping_address_id
-    JOIN dim_product            AS dp ON dp.product_id  = i.product_id
-    JOIN dim_channel            AS ch ON ch.channel_id  = o.channel_id
-    JOIN dim_province           AS pr ON pr.province_id = a.province_id
+    LEFT JOIN raw.address       AS a  ON a.address_id   = o.shipping_address_id
+    LEFT JOIN dim_product       AS dp ON dp.product_id  = i.product_id
+    LEFT JOIN dim_channel       AS ch ON ch.channel_id  = o.channel_id
+    LEFT JOIN dim_province      AS pr ON pr.province_id = a.province_id
     LEFT JOIN dim_customer      AS dc ON dc.customer_id = o.customer_id
     LEFT JOIN dim_store         AS ds ON ds.store_id    = o.store_id
     LEFT JOIN dim_address       AS da ON da.address_id  = o.shipping_address_id
@@ -136,26 +140,26 @@ SELECT
     o.order_id,
     CAST(strftime(o.order_date, '%Y%m%d') AS INTEGER)  AS date_key,
     COALESCE(dc.customer_key, -1)                      AS customer_key,
-    ch.channel_key,
+    COALESCE(ch.channel_key, -1)                       AS channel_key,
     COALESCE(ds.store_key, -1)                         AS store_key,
-    pr.province_key,
+    COALESCE(pr.province_key, -1)                      AS province_key,
     COALESCE(sa.address_key, -1)                       AS shipping_address_key,
     COALESCE(ba.address_key, -1)                       AS billing_address_key,
     COALESCE(st.status_key, -1)                        AS status_key,
     COALESCE(pm.payment_method_key, -1)                AS payment_method_key,
     COALESCE(st.is_sale, FALSE)                        AS is_sale,
     sh.order_id IS NOT NULL                            AS has_shipment,
-    it.item_lines,
-    it.units,
+    COALESCE(it.item_lines, 0)                         AS item_lines,
+    COALESCE(it.units, 0)                              AS units,
     o.subtotal,
-    it.discount_amount,
+    COALESCE(it.discount_amount, 0)                    AS discount_amount,
     o.tax_amount,
     o.shipping_fee,
     o.total_amount
 FROM raw.sales_order         AS o
-JOIN raw.address             AS a  ON a.address_id    = o.shipping_address_id
-JOIN dim_channel             AS ch ON ch.channel_id   = o.channel_id
-JOIN dim_province            AS pr ON pr.province_id  = a.province_id
+LEFT JOIN raw.address        AS a  ON a.address_id    = o.shipping_address_id
+LEFT JOIN dim_channel        AS ch ON ch.channel_id   = o.channel_id
+LEFT JOIN dim_province       AS pr ON pr.province_id  = a.province_id
 LEFT JOIN dim_customer       AS dc ON dc.customer_id  = o.customer_id
 LEFT JOIN dim_store          AS ds ON ds.store_id     = o.store_id
 LEFT JOIN dim_address        AS sa ON sa.address_id   = o.shipping_address_id
@@ -164,7 +168,7 @@ LEFT JOIN dim_order_status   AS st ON st.status_code  = o.status
 LEFT JOIN raw.payment        AS pa ON pa.order_id     = o.order_id
 LEFT JOIN dim_payment_method AS pm ON pm.method_code  = pa.method
 LEFT JOIN (SELECT DISTINCT order_id FROM raw.shipment) AS sh ON sh.order_id = o.order_id
-JOIN (
+LEFT JOIN (
     SELECT order_id,
            COUNT(*)             AS item_lines,
            SUM(quantity)        AS units,
@@ -202,13 +206,13 @@ SELECT
     COALESCE(pm.payment_method_key, -1)                                 AS payment_method_key,
     COALESCE(ps.payment_status_key, -1)                                 AS payment_status_key,
     COALESCE(dc.customer_key, -1)                                       AS customer_key,
-    ch.channel_key,
+    COALESCE(ch.channel_key, -1)                                        AS channel_key,
     pa.transaction_ref,
     pa.amount,
     date_diff('minute', o.order_date, pa.paid_at)                       AS minutes_to_pay
 FROM raw.payment              AS pa
 JOIN raw.sales_order          AS o  ON o.order_id     = pa.order_id
-JOIN dim_channel              AS ch ON ch.channel_id  = o.channel_id
+LEFT JOIN dim_channel         AS ch ON ch.channel_id  = o.channel_id
 LEFT JOIN dim_payment_method  AS pm ON pm.method_code = pa.method
 LEFT JOIN dim_payment_status  AS ps ON ps.status_code = pa.status
 LEFT JOIN dim_customer        AS dc ON dc.customer_id = o.customer_id
@@ -248,9 +252,9 @@ SELECT
     COALESCE(CAST(strftime(s.shipped_at,   '%Y%m%d') AS INTEGER), -1)        AS shipped_date_key,
     COALESCE(CAST(strftime(s.delivered_at, '%Y%m%d') AS INTEGER), -1)        AS delivered_date_key,
     COALESCE(dc.customer_key, -1)                                            AS customer_key,
-    ch.channel_key,
+    COALESCE(ch.channel_key, -1)                                             AS channel_key,
     COALESCE(ds.store_key, -1)                                               AS store_key,
-    pr.province_key,
+    COALESCE(pr.province_key, -1)                                            AS province_key,
     COALESCE(da.address_key, -1)                                             AS shipping_address_key,
     COALESCE(ca.carrier_key, -1)                                             AS carrier_key,
     COALESCE(ss.shipment_status_key, -1)                                     AS shipment_status_key,
@@ -261,9 +265,9 @@ SELECT
     ROUND(date_diff('second', o.order_date, s.delivered_at) / 86400.0, 2)    AS days_to_deliver
 FROM raw.shipment              AS s
 JOIN raw.sales_order           AS o  ON o.order_id     = s.order_id
-JOIN raw.address               AS a  ON a.address_id   = o.shipping_address_id
-JOIN dim_channel               AS ch ON ch.channel_id  = o.channel_id
-JOIN dim_province              AS pr ON pr.province_id = a.province_id
+LEFT JOIN raw.address          AS a  ON a.address_id   = o.shipping_address_id
+LEFT JOIN dim_channel          AS ch ON ch.channel_id  = o.channel_id
+LEFT JOIN dim_province         AS pr ON pr.province_id = a.province_id
 LEFT JOIN dim_customer         AS dc ON dc.customer_id = o.customer_id
 LEFT JOIN dim_store            AS ds ON ds.store_id    = o.store_id
 LEFT JOIN dim_address          AS da ON da.address_id  = o.shipping_address_id
@@ -297,7 +301,7 @@ SELECT
     w.session_id,
     CAST(strftime(w.started_at, '%Y%m%d') AS INTEGER)            AS date_key,
     COALESCE(dc.customer_key, -1)                                AS customer_key,
-    (SELECT channel_key FROM dim_channel WHERE code = 'ONLINE')  AS channel_key,
+    COALESCE((SELECT channel_key FROM dim_channel WHERE code = 'ONLINE'), -1) AS channel_key,
     COALESCE(ts.source_key, -1)                                  AS source_key,
     COALESCE(dv.device_key, -1)                                  AS device_key,
     CASE WHEN w.customer_id IS NOT NULL
@@ -341,7 +345,7 @@ SELECT
     n.nps_id,
     CAST(strftime(n.responded_at, '%Y%m%d') AS INTEGER)  AS date_key,
     COALESCE(dc.customer_key, -1)                        AS customer_key,
-    ch.channel_key,
+    COALESCE(ch.channel_key, -1)                         AS channel_key,
     nc.nps_category_key,
     n.score,
     CAST(nc.name = 'Promotor'  AS INTEGER)               AS is_promoter,
@@ -351,7 +355,7 @@ SELECT
     n.comment IS NOT NULL                                AS has_comment,
     n.comment
 FROM raw.nps_response    AS n
-JOIN dim_channel         AS ch ON ch.channel_id = n.channel_id
-JOIN dim_nps_category    AS nc ON n.score BETWEEN nc.min_score AND nc.max_score
+LEFT JOIN dim_channel    AS ch ON ch.channel_id = n.channel_id
+JOIN dim_nps_category    AS nc ON n.score BETWEEN nc.min_score AND nc.max_score   -- score 0-10 siempre cae en una categoría (CHECK)
 LEFT JOIN dim_customer   AS dc ON dc.customer_id = n.customer_id
 ORDER BY n.nps_id;
