@@ -10,6 +10,10 @@
 --     suma numerador y denominador del período filtrado y divide al final.
 --   * el único conteo DISTINTO (usuarios activos) no se puede sumar entre
 --     meses, por eso su mart ya trae calculado cada rango de meses posible.
+--   * el ranking (puesto y variación contra el mes anterior) se calcula acá
+--     para cada combinación de canal y provincia: el tablero no ordena nada.
+--   * las filas salen ordenadas (ORDER BY), así el tablero las muestra en
+--     el orden en que vienen.
 --
 -- Con esto el tablero solo FILTRA filas, SUMA columnas y hace la DIVISIÓN
 -- final, igual que una medida de Power BI / Looker Studio.
@@ -17,7 +21,8 @@
 -- Marts:
 --   mart_calendario_mes          meses disponibles (opciones del filtro de fecha)
 --   mart_ventas_mes              Ventas, Ticket, Ventas por provincia, meta Córdoba
---   mart_ventas_producto_mes     las mismas medidas con el filtro de producto + Ranking por producto
+--   mart_ventas_producto_mes     las mismas medidas con el filtro de producto
+--   mart_ranking_producto_mes    Ranking mensual por producto: puesto y variación ya calculados
 --   mart_usuarios_activos_rango  Usuarios activos para cada rango "desde mes - hasta mes"
 --   mart_nps_mes                 NPS (tarjeta y tendencia)
 --   mart_entregas_mes            días de entrega por provincia (meta Mendoza)
@@ -144,6 +149,86 @@ ORDER BY d.year_month, c.channel_key, p.province_key, pr.product_key;
 
 
 -- ---------------------------------------------------------------------
+-- mart_ranking_producto_mes — GRANO: mes × canal × provincia × producto,
+-- incluyendo los totales "Todos" (channel_key = 0) y "Todas" (province_key = 0)
+-- ---------------------------------------------------------------------
+-- Ranking mensual por producto según la consigna: SUM(line_total) por producto
+-- y DATE_TRUNC('month', order_date). El puesto se calcula para CADA combinación
+-- de filtros (GROUPING SETS), así el tablero solo filtra:
+--   Top N            -> WHERE puesto <= N   (el Top N es de cada mes)
+--   vs. mes anterior -> variacion_pct ya calculada con LAG sobre TODOS los meses
+--                       (no depende del rango elegido en el tablero)
+-- Se completan con 0 los productos sin ventas en un mes, para que siempre
+-- tengan puesto.
+CREATE TABLE mart_ranking_producto_mes (
+    year_month                  VARCHAR NOT NULL,
+    channel_key                 INTEGER NOT NULL,   -- 0 = todos los canales
+    province_key                INTEGER NOT NULL,   -- 0 = todas las provincias
+    product_key                 INTEGER NOT NULL,
+    product_name                VARCHAR NOT NULL,
+    puesto                      INTEGER NOT NULL,   -- RANK() por ventas netas, 1 = más vendido
+    ventas_netas                DECIMAL(14, 2) NOT NULL,   -- SUM(line_total)
+    unidades                    INTEGER NOT NULL,
+    ventas_netas_mes_anterior   DECIMAL(14, 2),            -- NULL en el primer mes
+    variacion_pct               DECIMAL(8, 2),             -- (ventas / mes anterior - 1) * 100
+    PRIMARY KEY (year_month, channel_key, province_key, product_key)
+);
+
+INSERT INTO mart_ranking_producto_mes
+WITH ventas AS (
+    SELECT d.year_month, f.channel_key, f.province_key, f.product_key,
+           SUM(f.line_total) AS ventas_netas, SUM(f.quantity) AS unidades
+    FROM fact_sales AS f
+    JOIN dim_date   AS d ON d.date_key = f.date_key
+    WHERE f.is_sale
+    GROUP BY d.year_month, f.channel_key, f.province_key, f.product_key
+),
+agregado AS (
+    SELECT year_month,
+           CASE WHEN GROUPING(channel_key)  = 1 THEN 0 ELSE channel_key  END AS channel_key,
+           CASE WHEN GROUPING(province_key) = 1 THEN 0 ELSE province_key END AS province_key,
+           product_key,
+           SUM(ventas_netas) AS ventas_netas,
+           SUM(unidades)     AS unidades
+    FROM ventas
+    GROUP BY GROUPING SETS (
+        (year_month, channel_key, province_key, product_key),
+        (year_month, channel_key, product_key),
+        (year_month, province_key, product_key),
+        (year_month, product_key))
+),
+grilla AS (   -- todas las combinaciones, para que cada producto tenga fila en cada mes
+    SELECT m.year_month, c.channel_key, p.province_key, pr.product_key, pr.name AS product_name
+    FROM (SELECT DISTINCT year_month FROM ventas) AS m
+    CROSS JOIN (SELECT DISTINCT channel_key  FROM agregado) AS c
+    CROSS JOIN (SELECT DISTINCT province_key FROM agregado) AS p
+    CROSS JOIN (SELECT product_key, name FROM dim_product WHERE product_key IN (SELECT product_key FROM ventas)) AS pr
+),
+completo AS (
+    SELECT g.*, COALESCE(a.ventas_netas, 0) AS ventas_netas, COALESCE(a.unidades, 0) AS unidades
+    FROM grilla AS g
+    LEFT JOIN agregado AS a USING (year_month, channel_key, province_key, product_key)
+),
+con_anterior AS (
+    SELECT *,
+           LAG(ventas_netas) OVER (PARTITION BY channel_key, province_key, product_key ORDER BY year_month) AS ventas_netas_mes_anterior
+    FROM completo
+)
+SELECT
+    year_month,
+    channel_key,
+    province_key,
+    product_key,
+    product_name,
+    RANK() OVER (PARTITION BY year_month, channel_key, province_key ORDER BY ventas_netas DESC) AS puesto,
+    ventas_netas,
+    unidades,
+    ventas_netas_mes_anterior,
+    ROUND((ventas_netas / NULLIF(ventas_netas_mes_anterior, 0) - 1) * 100, 2) AS variacion_pct
+FROM con_anterior
+ORDER BY year_month, channel_key, province_key, puesto, product_key;
+
+-- ---------------------------------------------------------------------
 -- mart_usuarios_activos_rango — GRANO: un rango de meses (desde, hasta)
 -- ---------------------------------------------------------------------
 -- COUNT(DISTINCT active_user_id) NO es aditivo: los usuarios de enero más
@@ -169,11 +254,14 @@ WITH usuario_mes AS (
     JOIN dim_date          AS d ON d.date_key = f.date_key
     GROUP BY d.year_month, f.active_user_id
 ),
+meses AS (
+    SELECT DISTINCT year_month, year, month FROM dim_date WHERE date_key <> -1
+),
 rangos AS (
     SELECT a.year_month AS desde_mes, b.year_month AS hasta_mes,
            (b.year - a.year) * 12 + b.month - a.month + 1 AS meses
-    FROM mart_calendario_mes AS a
-    JOIN mart_calendario_mes AS b ON a.year_month <= b.year_month
+    FROM meses AS a
+    JOIN meses AS b ON a.year_month <= b.year_month
 )
 SELECT
     r.desde_mes,
