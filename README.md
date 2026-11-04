@@ -1,7 +1,7 @@
 # EcoBottle AR — Mini ecosistema de datos comercial
 
 Trabajo práctico de **Introducción al Marketing Online y los Negocios Digitales**.
-A partir de los datos de origen de EcoBottle AR (carpeta `raw/`) se arma un **data warehouse con modelo estrella (Kimball)** en DuckDB y un **tablero comercial** publicado en GitHub Pages que lee las tablas de `dw/`.
+A partir de los datos de origen de EcoBottle AR (carpeta `raw/`) se arma un **data warehouse con modelo estrella (Kimball)** en DuckDB, una capa de **marts** (una tabla lista para cada visual) y un **tablero comercial** publicado en GitHub Pages que lee esos marts.
 
 - **Tablero en línea:** https://ramirocoletto.github.io/practica-imond/
 - **Diagrama completo del modelo:** [`dw/modelo_estrella.md`](./dw/modelo_estrella.md)
@@ -15,13 +15,14 @@ A partir de los datos de origen de EcoBottle AR (carpeta `raw/`) se arma un **da
 
 1. [Estructura del repositorio](#estructura-del-repositorio)
 2. [Instrucciones de ejecución](#instrucciones-de-ejecución)
-3. [Modelo estrella](#modelo-estrella)
-4. [Supuestos](#supuestos)
-5. [Diccionario de datos](#diccionario-de-datos)
-6. [Consultas clave (KPIs)](#consultas-clave-kpis)
-7. [Tablero](#tablero)
-8. [Hallazgos](#hallazgos)
-9. [Convenciones del repositorio](#convenciones-del-repositorio)
+3. [Arquitectura por capas](#arquitectura-por-capas)
+4. [Modelo estrella](#modelo-estrella)
+5. [Supuestos](#supuestos)
+6. [Diccionario de datos](#diccionario-de-datos)
+7. [Consultas clave (KPIs) y validaciones](#consultas-clave-kpis-y-validaciones)
+8. [Tablero](#tablero)
+9. [Hallazgos](#hallazgos)
+10. [Convenciones del repositorio](#convenciones-del-repositorio)
 
 ---
 
@@ -30,14 +31,16 @@ A partir de los datos de origen de EcoBottle AR (carpeta `raw/`) se arma un **da
 ```
 raw/                  datos de origen: un CSV por tabla (no se modifican)
 sql/
-  01_dimensiones.sql  10 dimensiones (CREATE TABLE + INSERT ... SELECT)
+  01_dimensiones.sql  15 dimensiones (CREATE TABLE + INSERT ... SELECT)
   02_hechos.sql       6 tablas de hechos con PRIMARY KEY y FOREIGN KEY
-  03_consultas.sql    controles de calidad + KPIs + metas y hallazgos
+  03_marts.sql        7 marts: una tabla lista para cada visual del tablero
+  04_consultas.sql    validaciones + KPIs + metas y hallazgos
 run_sql.py            arma el data warehouse ejecutando sql/ y exporta a dw/
-dw/                   el data warehouse en CSV (lo que lee el tablero) + diagrama
+dw/                   el data warehouse en CSV (dimensiones, hechos y marts) + diagrama
 dashboard/index.html  el tablero (HTML + Chart.js), publicado con GitHub Pages
 index.html            redirige la raíz del sitio al tablero
-assets/               DER de origen y captura del tablero
+.nojekyll             le indica a GitHub Pages que publique los archivos tal cual
+assets/               DER de origen (DER.png) y captura del tablero (dashboard.png)
 requirements.txt      dependencias (DuckDB)
 generator/            programa del profesor que generó los datos de raw/
 ```
@@ -47,7 +50,7 @@ generator/            programa del profesor que generó los datos de raw/
 Requisitos: Python 3.9+ y Git.
 
 ```bash
-# 1. Clonar el fork
+# 1. Clonar el repositorio
 git clone https://github.com/ramirocoletto/practica-imond.git
 cd practica-imond
 
@@ -62,7 +65,7 @@ pip install -r requirements.txt
 python run_sql.py
 ```
 
-`run_sql.py` borra y vuelve a crear la base, ejecuta `sql/01_…`, `02_…` y `03_…` en orden, muestra en la terminal el resultado de cada consulta de `03_consultas.sql`, exporta cada tabla a `dw/<tabla>.csv` y dibuja el modelo en `dw/modelo_estrella.md`.
+`run_sql.py` borra y vuelve a crear la base, ejecuta `sql/01_…` a `sql/04_…` en orden, muestra en la terminal el resultado de cada consulta de `04_consultas.sql` (validaciones y KPIs), exporta cada tabla a `dw/<tabla>.csv` y dibuja el modelo en `dw/modelo_estrella.md`. Correrlo dos veces da exactamente los mismos archivos.
 
 Otros modos:
 
@@ -77,19 +80,53 @@ El tablero lee los CSV de `dw/`, por eso necesita un servidor (abrir el HTML con
 
 ```bash
 python -m http.server 8000
-# abrir http://localhost:8000/
+# abrir http://localhost:8000/   (Ctrl + C para cortar)
 ```
 
 ### Publicarlo en GitHub Pages
 
-En el repositorio de GitHub: **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main` / `(root)` → Save**. A los minutos queda en `https://ramirocoletto.github.io/practica-imond/`. Cada vez que se corre `run_sql.py` y se hace `git push`, el tablero muestra los datos nuevos.
+**Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main` / `(root)` → Save**. Queda en `https://ramirocoletto.github.io/practica-imond/`. Cada vez que se corre `run_sql.py` y se hace `git push`, el tablero muestra los datos nuevos.
+
+## Arquitectura por capas
+
+```
+raw/*.csv ──► 01_dimensiones.sql ─┐
+              02_hechos.sql      ─┴► dim_* / fact_*  ──► 03_marts.sql ──► mart_*  ──► dashboard/index.html
+              (ETL en SQL: joins,      modelo estrella      (agregación por mes,        (solo filtra filas,
+               claves, reglas)                               joins con dimensiones,      suma columnas y
+                                                             conteos distintos)          divide al final)
+```
+
+| Capa | Lee de | Qué hace |
+|---|---|---|
+| `dim_*` / `fact_*` | `raw.*` | Modelo estrella: claves subrogadas, miembros −1, reglas de negocio (qué es una venta, provincia de envío, usuario activo, categoría NPS) |
+| `mart_*` | **solo** `fact_*` y `dim_*` | Una tabla por visual, ya unida con los nombres de sus dimensiones y agregada por mes, con medidas **aditivas** (sumas y conteos). El único conteo distinto (usuarios activos) se precalcula para cada rango de meses |
+| Tablero | **solo** `mart_*` (+ `dim_channel`, `dim_province`, `dim_product` para llenar los filtros) | Filtra filas, suma columnas y hace la división final de un cociente, como una medida de Power BI / Looker Studio. No hace joins, ni conteos distintos, ni recorre tablas de hechos |
+
+**Qué calcula el tablero** (todo dentro de "filtrar, sumar y dividir"):
+
+| Indicador | Mart | Cálculo en el navegador |
+|---|---|---|
+| Total Ventas | `mart_ventas_mes` (o `mart_ventas_producto_mes` con producto) | `SUM(ventas)` de las filas filtradas |
+| Ticket Promedio | ídem | `SUM(ventas) / SUM(pedidos)` |
+| Usuarios Activos | `mart_usuarios_activos_rango` | Se lee la fila `desde_mes`–`hasta_mes` del filtro (sin sumar) |
+| NPS | `mart_nps_mes` | `SUM(puntos_nps) / SUM(respuestas)` |
+| Ventas por provincia | `mart_ventas_mes` | `SUM(ventas)` por provincia y su % sobre el total |
+| Ranking por producto | `mart_ventas_producto_mes` | `SUM(ventas_netas)` por producto y mes, ordenado (Top N) |
+| Variación vs. período anterior / meta Córdoba | `mart_ventas_mes` | Cociente de dos sumas − 1 |
+| Días de entrega | `mart_entregas_mes` (o `_producto_mes`) | `SUM(suma_dias_entrega) / SUM(envios_entregados)` por provincia y trimestre |
 
 ## Modelo estrella
 
-Seis tablas de hechos comparten las dimensiones (constelación de hechos / *bus matrix* de Kimball). Las dimensiones usan **claves subrogadas** (`*_key`) y guardan la **clave natural** del origen (`*_id`). La fecha usa una clave inteligente `AAAAMMDD`.
+Seis tablas de hechos comparten las dimensiones (constelación de hechos / *bus matrix* de Kimball). Las dimensiones usan **claves subrogadas** (`*_key`) y guardan la **clave natural** del origen (`*_id`). La fecha usa una clave inteligente `AAAAMMDD`. Todas las FK se declaran en el `CREATE TABLE` (DuckDB no permite agregarlas con `ALTER TABLE`), por eso las dimensiones se crean primero.
 
 ```mermaid
 erDiagram
+    dim_address ||--o{ fact_orders : "billing_address_key"
+    dim_address ||--o{ fact_orders : "shipping_address_key"
+    dim_address ||--o{ fact_sales : "shipping_address_key"
+    dim_address ||--o{ fact_shipments : "shipping_address_key"
+    dim_carrier ||--o{ fact_shipments : "carrier_key"
     dim_channel ||--o{ fact_nps : "channel_key"
     dim_channel ||--o{ fact_orders : "channel_key"
     dim_channel ||--o{ fact_payments : "channel_key"
@@ -112,73 +149,91 @@ erDiagram
     dim_date ||--o{ fact_shipments : "shipped_date_key"
     dim_date ||--o{ fact_web_sessions : "date_key"
     dim_device ||--o{ fact_web_sessions : "device_key"
+    dim_nps_category ||--o{ fact_nps : "nps_category_key"
     dim_order_status ||--o{ fact_orders : "status_key"
     dim_order_status ||--o{ fact_sales : "status_key"
     dim_payment_method ||--o{ fact_orders : "payment_method_key"
     dim_payment_method ||--o{ fact_payments : "payment_method_key"
+    dim_payment_status ||--o{ fact_payments : "payment_status_key"
     dim_product ||--o{ fact_sales : "product_key"
     dim_province ||--o{ fact_orders : "province_key"
     dim_province ||--o{ fact_sales : "province_key"
     dim_province ||--o{ fact_shipments : "province_key"
+    dim_shipment_status ||--o{ fact_shipments : "shipment_status_key"
     dim_store ||--o{ fact_orders : "store_key"
     dim_store ||--o{ fact_sales : "store_key"
     dim_store ||--o{ fact_shipments : "store_key"
     dim_traffic_source ||--o{ fact_web_sessions : "source_key"
 ```
 
-| Hecho | Grano (una fila =) | Métricas principales | Dimensiones |
-|---|---|---|---|
-| `fact_sales` | un producto dentro de un pedido | quantity, line_total, total_amount_allocated | fecha, producto, cliente, canal, tienda, provincia, estado |
-| `fact_orders` | un pedido | total_amount, subtotal, tax_amount, shipping_fee, units | fecha, cliente, canal, tienda, provincia, estado, medio de pago |
-| `fact_payments` | un pago | amount, minutes_to_pay | fecha de pedido y de cobro, medio de pago, cliente, canal |
-| `fact_shipments` | un envío por correo | hours_to_ship, days_in_transit, days_to_deliver | fecha de pedido / despacho / entrega, cliente, canal, tienda, provincia |
-| `fact_web_sessions` | una visita a la web | active_user_id, duration_seconds | fecha, cliente, canal, origen, dispositivo |
-| `fact_nps` | una respuesta NPS | score, nps_points, is_promoter, is_detractor | fecha, cliente, canal |
+| Hecho | Grano (una fila =) | Métricas principales |
+|---|---|---|
+| `fact_sales` | un producto dentro de un pedido | quantity, line_total, total_amount_allocated |
+| `fact_orders` | un pedido | total_amount, subtotal, tax_amount, shipping_fee, units |
+| `fact_payments` | un pago | amount, minutes_to_pay |
+| `fact_shipments` | un envío por correo | hours_to_ship, days_in_transit, days_to_deliver |
+| `fact_web_sessions` | una visita a la web | duration_seconds (y active_user_id para el conteo distinto) |
+| `fact_nps` | una respuesta NPS | score, nps_points, is_promoter, is_detractor |
 
 **Matriz de dimensiones compartidas** (✓ = el hecho usa la dimensión):
 
-| | fecha | canal | provincia | producto | tienda | cliente | estado | medio de pago | origen | dispositivo |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| `fact_sales` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | |
-| `fact_orders` | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | ✓ | | |
-| `fact_payments` | ✓ | ✓ | | | | ✓ | | ✓ | | |
-| `fact_shipments` | ✓ | ✓ | ✓ | | ✓ | ✓ | | | | |
-| `fact_web_sessions` | ✓ | ✓ | | | | ✓ | | | ✓ | ✓ |
-| `fact_nps` | ✓ | ✓ | | | | ✓ | | | | |
+| | fecha | canal | provincia | dirección | producto | tienda | cliente | estado pedido | medio de pago | estado pago | estado envío | correo | origen | dispositivo | categoría NPS |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| `fact_sales` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | | | | | | |
+| `fact_orders` | ✓ | ✓ | ✓ | ✓ (envío y facturación) | | ✓ | ✓ | ✓ | ✓ | | | | | | |
+| `fact_payments` | ✓ (pedido y cobro) | ✓ | | | | | ✓ | | ✓ | ✓ | | | | | |
+| `fact_shipments` | ✓ (pedido, despacho, entrega) | ✓ | ✓ | ✓ | | ✓ | ✓ | | | | ✓ | ✓ | | | |
+| `fact_web_sessions` | ✓ | ✓ | | | | | ✓ | | | | | | ✓ | ✓ | |
+| `fact_nps` | ✓ | ✓ | | | | | ✓ | | | | | | | | ✓ |
+
+Las 13 tablas de `raw/` quedan cubiertas: `product_category` se aplana en `dim_product`, `province` y `address` forman `dim_province` y `dim_address` (que conserva ciudad y código postal), y cada tabla transaccional es un hecho.
 
 ## Supuestos
 
-1. **Qué es una venta:** solo los pedidos con estado `PAID` o `FULFILLED` (regla de la consigna). Los hechos guardan **todos** los pedidos y marcan `is_sale`, para poder analizar también cancelaciones y reembolsos.
+**Modelo y reglas de negocio**
+
+1. **Qué es una venta:** solo los pedidos con estado `PAID` o `FULFILLED` (regla de la consigna, guardada en `dim_order_status.is_sale`). Los hechos guardan **todos** los pedidos, para poder analizar también cancelaciones y reembolsos.
 2. **Montos:** `total_amount` incluye IVA (21 %) y costo de envío; `line_total` es neto, sin IVA. "Total Ventas" y "Ticket Promedio" usan `total_amount`; el "Ranking por producto" usa `line_total`, como pide la consigna.
-3. **Ventas filtradas por producto:** un pedido puede tener los dos productos. Para filtrar "Ventas" por producto sin cambiar su definición, `fact_sales.total_amount_allocated` reparte el `total_amount` del pedido entre sus líneas en proporción a `line_total`. La suma por pedido da exactamente el total (se verifica en `03_consultas.sql`, control A2).
+3. **Ventas filtradas por producto:** un pedido puede tener los dos productos y `total_amount` es de cabecera. Para no duplicarlo, `fact_sales.total_amount_allocated` reparte el total del pedido entre sus líneas en proporción a `line_total`. Cada línea se redondea a centavos y la última línea de cada pedido absorbe la diferencia de redondeo, así la suma por pedido es **exacta** (control A2: 0 pedidos con diferencia).
 4. **Provincia de una venta:** la de la **dirección de envío** (`shipping_address_id → address.province_id`). En compras en tienda es la dirección de la tienda.
-5. **Usuarios activos:** `COUNT(DISTINCT active_user_id)`, donde `active_user_id` es `C-<customer_id>` si la persona inició sesión y `S-<session_id>` si es anónima (cada sesión anónima cuenta como un usuario). Las sesiones web pertenecen al canal ONLINE y no tienen provincia ni producto.
-6. **NPS:** `(%9-10 − %0-6) × 100`. Se guarda `nps_points` (+100 / 0 / −100) para que el NPS de cualquier corte sea `AVG(nps_points)`. La encuesta no tiene pedido asociado: se analiza por canal y fecha de respuesta, no por provincia ni producto.
-7. **Datos faltantes:** en lugar de FKs nulas se usa la fila **−1** ("Anónimo", "Online (sin tienda)", "Sin dato") en `dim_customer`, `dim_store`, `dim_traffic_source` y `dim_device`. Las fechas opcionales (`paid_date_key`, `shipped_date_key`, `delivered_date_key`) quedan en NULL cuando el evento no ocurrió.
-8. **Fechas:** la foto del sistema es del 30/09/2025 23:59:59, hora de Argentina. `dim_date` cubre del 01/01/2024 al 30/09/2025; el último trimestre (2025-T3) está completo.
-9. **Tiempos de entrega:** se miden del pedido a la entrega (`days_to_deliver`), solo para envíos `DELIVERED`, y se asignan al trimestre de la fecha del pedido.
-10. **Meta Córdoba (+15 %):** se compara el último trimestre (2025-T3) contra el mismo trimestre del año anterior (2024-T3), para no mezclar estacionalidad; también se muestra la variación contra el trimestre anterior.
-11. **Tablero en GitHub Pages en lugar de Looker Studio / Power BI:** se trabaja en Mac (Power BI Desktop no existe para macOS). El tablero es una página estática que lee directamente los CSV de `dw/`, así cumple que la fuente sea el data warehouse.
+5. **Usuarios activos:** `COUNT(DISTINCT active_user_id)`, donde `active_user_id` es `C-<customer_id>` si la persona inició sesión y `S-<session_id>` si es anónima (cada sesión anónima cuenta como un usuario). La sesión se asigna a la fecha en que **empezó** (`started_at`). Las sesiones son del canal ONLINE y no tienen provincia ni producto.
+6. **NPS:** `(%9-10 − %0-6) × 100`. Las categorías están en `dim_nps_category`; cada respuesta aporta `nps_points` (+100 / 0 / −100), así el NPS es `SUM(puntos) / respuestas`. La respuesta se asigna a la fecha en que se respondió y no tiene pedido asociado: se analiza por canal, no por provincia ni producto.
+7. **Datos faltantes:** ninguna FK queda en NULL. Lo que falta apunta al miembro **−1** de su dimensión: cliente anónimo, pedido online sin tienda, pedido sin dirección de facturación, fecha de un evento que no ocurrió (`paid_date_key`, `shipped_date_key`, `delivered_date_key` = −1 "Sin fecha"), origen o dispositivo sin dato, y cualquier código de estado, medio de pago o correo que no esté en la dimensión.
+8. **Catálogos desde raw:** `dim_order_status`, `dim_payment_method`, `dim_payment_status`, `dim_shipment_status`, `dim_carrier`, `dim_traffic_source` y `dim_device` se cargan con los valores **distintos** de `raw/`; las descripciones en español se agregan con `CASE`. Un código nuevo entra solo a la dimensión (con su código como descripción) y los hechos se unen con `LEFT JOIN … COALESCE(clave, -1)`, así no se pierde ninguna fila (control A1).
+9. **Clasificación de marketing** (`dim_traffic_source.marketing_type`, propia): *Pago* = `ads` (publicidad en redes); *Propio* = `direct` y `referral` (canales de la marca y newsletter); *Ganado* = `organic` (buscadores).
+10. **Dimensiones degeneradas:** `order_id`, `tracking_number`, `transaction_ref`, `active_user_id` y el comentario del NPS quedan en los hechos porque son identificadores o texto libre sin atributos propios.
+11. **Fechas:** la foto del sistema es del 30/09/2025 23:59:59, hora de Argentina. `dim_date` cubre del 01/01/2024 al 30/09/2025; el último trimestre (2025-T3) está completo.
+12. **Tiempos de entrega:** se miden del pedido a la entrega (`days_to_deliver`), solo para envíos `DELIVERED`, y se asignan al mes de la fecha del **pedido**. Con filtro de producto se toman los envíos de pedidos que **incluyen** ese producto.
+
+**Tablero**
+
+13. **Filtro de fecha mensual:** los marts agregan por mes, así que el filtro de fecha elige meses (desde / hasta). Los hechos sí tienen la fecha diaria, por si se necesitara otro mart.
+14. **Período anterior:** las flechas de las tarjetas comparan contra los mismos meses inmediatamente anteriores al rango elegido (ej. jul–sep 2025 contra abr–jun 2025). Si el rango empieza en enero de 2024 no hay período anterior.
+15. **Meta Córdoba (+15 %):** se toma el trimestre del mes "Hasta" (hasta ese mes inclusive) y se compara contra los mismos meses del año anterior, para no mezclar estacionalidad. Respeta los filtros de canal y producto; la provincia es siempre Córdoba. Si el mes "Hasta" es de 2024 no hay año anterior para comparar.
+16. **Gráficos de comparación:** "Ventas por provincia" y "Días de entrega" comparan provincias, por eso el filtro de provincia **resalta** la elegida en lugar de ocultar las demás (el tablero lo avisa). El ranking ordena todos los productos; con filtro de producto muestra solo ese producto con su puesto real.
+17. **Tablero en GitHub Pages en lugar de Looker Studio / Power BI:** se trabaja en Mac (Power BI Desktop no existe para macOS). El tablero es una página estática que lee los marts de `dw/`.
 
 ## Diccionario de datos
 
 Tipos tal como quedan en DuckDB. PK = clave primaria, FK = clave foránea.
 
+### Dimensiones, hechos y marts
+
 #### `dim_date`
 
-Calendario día a día (01/01/2024 – 30/09/2025). Una fila por día.
+Calendario día a día (01/01/2024 – 30/09/2025) + fila −1 "Sin fecha".
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `date_key` | INTEGER | PK | Clave AAAAMMDD (ej. 20240131) |
-| `full_date` | DATE |  | Fecha |
+| `date_key` | INTEGER | PK | Clave AAAAMMDD (ej. 20240131); −1 = sin fecha |
+| `full_date` | DATE |  | Fecha (NULL en −1) |
 | `year` | INTEGER |  | Año |
 | `quarter` | INTEGER |  | Trimestre 1–4 |
 | `year_quarter` | VARCHAR |  | Ej. 2025-T3 |
 | `month` | INTEGER |  | Mes 1–12 |
 | `month_name` | VARCHAR |  | Enero…Diciembre |
 | `year_month` | VARCHAR |  | Ej. 2025-09 |
-| `month_start` | DATE |  | Primer día del mes (equivale a DATE_TRUNC) |
+| `month_start` | DATE |  | Primer día del mes (= DATE_TRUNC) |
 | `iso_week` | INTEGER |  | Semana ISO |
 | `day_of_month` | INTEGER |  | Día 1–31 |
 | `day_of_week` | INTEGER |  | 1 = lunes … 7 = domingo |
@@ -187,7 +242,7 @@ Calendario día a día (01/01/2024 – 30/09/2025). Una fila por día.
 
 #### `dim_channel`
 
-Canal de venta. Una fila por canal.
+Canal de venta.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
@@ -198,7 +253,7 @@ Canal de venta. Una fila por canal.
 
 #### `dim_province`
 
-Provincia. Una fila por provincia.
+Provincia.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
@@ -208,9 +263,27 @@ Provincia. Una fila por provincia.
 | `code` | VARCHAR |  | BA / CBA / SF / MZA |
 | `iso_3166_2` | VARCHAR |  | Código ISO para mapas (AR-B, AR-X, AR-S, AR-M) |
 
+#### `dim_address`
+
+Dirección (geografía al nivel más fino) + fila −1 "Desconocida".
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `address_key` | INTEGER | PK | Clave subrogada (−1 = desconocida) |
+| `address_id` | BIGINT |  | Clave natural (raw.address) |
+| `line1` | VARCHAR |  | Calle y número |
+| `line2` | VARCHAR |  | Piso / depto. (puede faltar) |
+| `city` | VARCHAR |  | Ciudad |
+| `postal_code` | VARCHAR |  | Código postal |
+| `country_code` | VARCHAR |  | AR |
+| `province_name` | VARCHAR |  | Provincia (aplanada) |
+| `province_code` | VARCHAR |  | BA / CBA / SF / MZA |
+| `address_type` | VARCHAR |  | Tienda / Cliente / Desconocida |
+| `created_at` | TIMESTAMP |  | Alta de la dirección |
+
 #### `dim_product`
 
-Producto con la jerarquía de categorías aplanada. Una fila por producto.
+Producto con la jerarquía de categorías aplanada.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
@@ -230,7 +303,7 @@ Tienda física con su dirección aplanada. Fila −1 = pedidos online (sin tiend
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
 | `store_key` | INTEGER | PK | Clave subrogada (−1 = Online) |
-| `store_id` | INTEGER |  | Clave natural (NULL en la fila −1) |
+| `store_id` | INTEGER |  | Clave natural (NULL en −1) |
 | `name` | VARCHAR |  | Tienda BA, Tienda CBA, … |
 | `address_line` | VARCHAR |  | Calle y número |
 | `city` | VARCHAR |  | Ciudad |
@@ -244,13 +317,13 @@ Cliente. Fila −1 = anónimo (NPS sin cliente, sesiones sin login).
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
 | `customer_key` | INTEGER | PK | Clave subrogada (−1 = anónimo) |
-| `customer_id` | INTEGER |  | Clave natural (NULL en la fila −1) |
+| `customer_id` | INTEGER |  | Clave natural (NULL en −1) |
 | `email` | VARCHAR |  | Email (único) |
 | `first_name` | VARCHAR |  | Nombre |
 | `last_name` | VARCHAR |  | Apellido |
 | `full_name` | VARCHAR |  | Nombre y apellido |
 | `phone` | VARCHAR |  | Teléfono (puede faltar) |
-| `status_code` | VARCHAR |  | A / I (? en la fila −1) |
+| `status_code` | VARCHAR |  | A / I (? en −1) |
 | `status` | VARCHAR |  | Activo / Inactivo (baja) / Desconocido |
 | `created_at` | TIMESTAMP |  | Fecha y hora de alta |
 | `created_date` | DATE |  | Fecha de alta |
@@ -258,39 +331,70 @@ Cliente. Fila −1 = anónimo (NPS sin cliente, sesiones sin login).
 
 #### `dim_order_status`
 
-Estado del pedido y regla de qué cuenta como venta.
+Estado del pedido (valores distintos de raw) + −1. Regla de qué cuenta como venta.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `status_key` | INTEGER | PK | Clave |
+| `status_key` | INTEGER | PK | Clave (−1 = desconocido) |
 | `status_code` | VARCHAR |  | CREATED / PAID / FULFILLED / CANCELLED / REFUNDED |
 | `description` | VARCHAR |  | Descripción |
 | `is_sale` | BOOLEAN |  | TRUE solo para PAID y FULFILLED |
 
 #### `dim_payment_method`
 
-Medio de pago.
+Medio de pago (valores distintos de raw) + −1.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `payment_method_key` | INTEGER | PK | Clave |
+| `payment_method_key` | INTEGER | PK | Clave (−1 = sin dato) |
 | `method_code` | VARCHAR |  | CARD / GATEWAY / CASH / TRANSFER |
 | `description` | VARCHAR |  | Tarjeta, Mercado Pago, Efectivo, Transferencia |
 
+#### `dim_payment_status`
+
+Estado del pago (valores distintos de raw) + −1.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `payment_status_key` | INTEGER | PK | Clave (−1 = sin dato) |
+| `status_code` | VARCHAR |  | PENDING / PAID / FAILED / REFUNDED |
+| `description` | VARCHAR |  | Pendiente, Cobrado, Rechazado, Reembolsado |
+| `is_collected` | BOOLEAN |  | TRUE si el dinero ingresó (PAID) |
+
+#### `dim_shipment_status`
+
+Estado del envío (valores distintos de raw) + −1.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `shipment_status_key` | INTEGER | PK | Clave (−1 = sin dato) |
+| `status_code` | VARCHAR |  | READY / SHIPPED / DELIVERED / CANCELLED |
+| `description` | VARCHAR |  | En preparación, En viaje, Entregado, Cancelado |
+| `is_delivered` | BOOLEAN |  | TRUE si se entregó |
+
+#### `dim_carrier`
+
+Empresa de correo (valores distintos de raw) + −1.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `carrier_key` | INTEGER | PK | Clave (−1 = sin dato) |
+| `name` | VARCHAR |  | Correo Argentino |
+
 #### `dim_traffic_source`
 
-Origen de la visita web, agrupado por tipo de marketing.
+Origen de la visita web (valores distintos de raw) + −1.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
 | `source_key` | INTEGER | PK | Clave (−1 = sin dato) |
 | `source_code` | VARCHAR |  | ads / direct / referral / organic |
 | `description` | VARCHAR |  | Descripción |
-| `marketing_type` | VARCHAR |  | Pago / Propio / Ganado |
+| `marketing_type` | VARCHAR |  | Pago / Propio / Ganado (clasificación propia) |
 
 #### `dim_device`
 
-Dispositivo de la visita web.
+Dispositivo de la visita web (valores distintos de raw) + −1.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
@@ -298,28 +402,41 @@ Dispositivo de la visita web.
 | `device_code` | VARCHAR |  | mobile / desktop / tablet |
 | `description` | VARCHAR |  | Celular / Computadora / Tablet |
 
+#### `dim_nps_category`
+
+Categoría NPS, con los rangos de la definición del NPS.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `nps_category_key` | INTEGER | PK | Clave |
+| `name` | VARCHAR |  | Detractor / Pasivo / Promotor |
+| `min_score` | SMALLINT |  | Puntaje mínimo (0 / 7 / 9) |
+| `max_score` | SMALLINT |  | Puntaje máximo (6 / 8 / 10) |
+| `nps_points` | INTEGER |  | Aporte al NPS: −100 / 0 / +100 |
+
 #### `fact_sales`
 
-**Grano: una línea de pedido** (un producto dentro de un pedido). Origen: `sales_order_item` + `sales_order`.
+**Grano: una línea de pedido.** Origen: `sales_order_item` + `sales_order`.
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
 | `order_item_id` | BIGINT | PK | Clave natural de la línea |
-| `order_id` | BIGINT |  | Número de pedido (dimensión degenerada) |
+| `order_id` | BIGINT |  | Pedido (dimensión degenerada) |
 | `date_key` | INTEGER | FK → dim_date | Fecha del pedido |
 | `product_key` | INTEGER | FK → dim_product | Producto |
 | `customer_key` | INTEGER | FK → dim_customer | Cliente |
 | `channel_key` | INTEGER | FK → dim_channel | Canal |
 | `store_key` | INTEGER | FK → dim_store | Tienda (−1 = online) |
 | `province_key` | INTEGER | FK → dim_province | Provincia de la dirección de envío |
+| `shipping_address_key` | INTEGER | FK → dim_address | Dirección de envío |
 | `status_key` | INTEGER | FK → dim_order_status | Estado del pedido |
-| `is_sale` | BOOLEAN |  | El pedido cuenta como venta |
+| `is_sale` | BOOLEAN |  | El pedido cuenta como venta (de dim_order_status) |
 | `quantity` | INTEGER |  | Unidades (> 0) |
 | `unit_price` | DECIMAL(12,2) |  | Precio unitario sin IVA |
 | `gross_amount` | DECIMAL(12,2) |  | quantity × unit_price |
 | `discount_amount` | DECIMAL(12,2) |  | Descuento de la línea |
 | `line_total` | DECIMAL(12,2) |  | gross_amount − discount_amount (sin IVA) |
-| `total_amount_allocated` | DECIMAL(12,2) |  | Total del pedido (con IVA y envío) repartido en proporción a line_total |
+| `total_amount_allocated` | DECIMAL(12,2) |  | Total del pedido (con IVA y envío) repartido por line_total; suma exacta por pedido |
 
 #### `fact_orders`
 
@@ -333,6 +450,8 @@ Dispositivo de la visita web.
 | `channel_key` | INTEGER | FK → dim_channel | Canal |
 | `store_key` | INTEGER | FK → dim_store | Tienda (−1 = online) |
 | `province_key` | INTEGER | FK → dim_province | Provincia de la dirección de envío |
+| `shipping_address_key` | INTEGER | FK → dim_address | Dirección de envío |
+| `billing_address_key` | INTEGER | FK → dim_address | Dirección de facturación (−1 = no tiene) |
 | `status_key` | INTEGER | FK → dim_order_status | Estado |
 | `payment_method_key` | INTEGER | FK → dim_payment_method | Medio de pago (1 pago por pedido) |
 | `is_sale` | BOOLEAN |  | PAID o FULFILLED |
@@ -354,14 +473,14 @@ Dispositivo de la visita web.
 | `payment_id` | BIGINT | PK | Clave natural del pago |
 | `order_id` | BIGINT |  | Pedido (dimensión degenerada) |
 | `order_date_key` | INTEGER | FK → dim_date | Fecha del pedido |
-| `paid_date_key` | INTEGER | FK → dim_date | Fecha de cobro (NULL si no se cobró) |
+| `paid_date_key` | INTEGER | FK → dim_date | Fecha de cobro (−1 = no se cobró) |
 | `payment_method_key` | INTEGER | FK → dim_payment_method | Medio de pago |
+| `payment_status_key` | INTEGER | FK → dim_payment_status | Estado del pago |
 | `customer_key` | INTEGER | FK → dim_customer | Cliente |
 | `channel_key` | INTEGER | FK → dim_channel | Canal |
-| `payment_status` | VARCHAR |  | PENDING / PAID / FAILED / REFUNDED |
-| `transaction_ref` | VARCHAR |  | Referencia de la transacción |
+| `transaction_ref` | VARCHAR |  | Referencia de la transacción (dimensión degenerada) |
 | `amount` | DECIMAL(12,2) |  | Importe |
-| `minutes_to_pay` | INTEGER |  | Minutos entre el pedido y el cobro |
+| `minutes_to_pay` | INTEGER |  | Minutos entre el pedido y el cobro (NULL si no se cobró) |
 
 #### `fact_shipments`
 
@@ -372,16 +491,17 @@ Dispositivo de la visita web.
 | `shipment_id` | BIGINT | PK | Clave natural del envío |
 | `order_id` | BIGINT |  | Pedido (dimensión degenerada) |
 | `order_date_key` | INTEGER | FK → dim_date | Fecha del pedido |
-| `shipped_date_key` | INTEGER | FK → dim_date | Fecha de despacho |
-| `delivered_date_key` | INTEGER | FK → dim_date | Fecha de entrega |
+| `shipped_date_key` | INTEGER | FK → dim_date | Fecha de despacho (−1 = no salió) |
+| `delivered_date_key` | INTEGER | FK → dim_date | Fecha de entrega (−1 = no llegó) |
 | `customer_key` | INTEGER | FK → dim_customer | Cliente |
 | `channel_key` | INTEGER | FK → dim_channel | Canal |
 | `store_key` | INTEGER | FK → dim_store | Tienda que despacha (−1 = online) |
 | `province_key` | INTEGER | FK → dim_province | Provincia de destino |
-| `carrier` | VARCHAR |  | Correo |
-| `tracking_number` | VARCHAR |  | Número de seguimiento |
-| `shipment_status` | VARCHAR |  | READY / SHIPPED / DELIVERED / CANCELLED |
-| `is_delivered` | BOOLEAN |  | Se entregó |
+| `shipping_address_key` | INTEGER | FK → dim_address | Dirección de destino |
+| `carrier_key` | INTEGER | FK → dim_carrier | Correo |
+| `shipment_status_key` | INTEGER | FK → dim_shipment_status | Estado del envío |
+| `tracking_number` | VARCHAR |  | Número de seguimiento (dimensión degenerada) |
+| `is_delivered` | BOOLEAN |  | Se entregó (de dim_shipment_status) |
 | `hours_to_ship` | DECIMAL(8,2) |  | Horas del pedido al despacho |
 | `days_in_transit` | DECIMAL(8,2) |  | Días del despacho a la entrega |
 | `days_to_deliver` | DECIMAL(8,2) |  | Días del pedido a la entrega |
@@ -393,12 +513,12 @@ Dispositivo de la visita web.
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
 | `session_id` | BIGINT | PK | Clave natural de la sesión |
-| `date_key` | INTEGER | FK → dim_date | Fecha de inicio |
+| `date_key` | INTEGER | FK → dim_date | Fecha de inicio (started_at) |
 | `customer_key` | INTEGER | FK → dim_customer | Cliente (−1 = sin login) |
 | `channel_key` | INTEGER | FK → dim_channel | Siempre ONLINE |
 | `source_key` | INTEGER | FK → dim_traffic_source | Origen de la visita |
 | `device_key` | INTEGER | FK → dim_device | Dispositivo |
-| `active_user_id` | VARCHAR |  | 'C-<cliente>' si inició sesión, 'S-<sesión>' si es anónimo |
+| `active_user_id` | VARCHAR |  | 'C-<cliente>' o 'S-<sesión>' (dimensión degenerada) |
 | `is_logged_in` | BOOLEAN |  | Inició sesión |
 | `duration_seconds` | INTEGER |  | Duración (NULL si no tiene fin) |
 
@@ -412,18 +532,143 @@ Dispositivo de la visita web.
 | `date_key` | INTEGER | FK → dim_date | Fecha de respuesta |
 | `customer_key` | INTEGER | FK → dim_customer | Cliente (−1 = anónimo) |
 | `channel_key` | INTEGER | FK → dim_channel | Canal |
+| `nps_category_key` | INTEGER | FK → dim_nps_category | Promotor / Pasivo / Detractor |
 | `score` | SMALLINT |  | Puntaje 0–10 |
-| `nps_category` | VARCHAR |  | Promotor (9–10) / Pasivo (7–8) / Detractor (0–6) |
 | `is_promoter` | INTEGER |  | 1 si es promotor |
 | `is_passive` | INTEGER |  | 1 si es pasivo |
 | `is_detractor` | INTEGER |  | 1 si es detractor |
-| `nps_points` | INTEGER |  | +100 / 0 / −100 → NPS = AVG(nps_points) |
+| `nps_points` | INTEGER |  | +100 / 0 / −100 |
 | `has_comment` | BOOLEAN |  | Dejó comentario |
-| `comment` | VARCHAR |  | Comentario libre |
+| `comment` | VARCHAR |  | Comentario libre (dimensión degenerada) |
 
-## Consultas clave (KPIs)
+#### `mart_calendario_mes`
 
-Todas están en [`sql/03_consultas.sql`](./sql/03_consultas.sql) y se calculan **solo con el modelo estrella**. Resultados sobre todo el período (01/2024 – 09/2025):
+**Mart — grano: un mes.** Opciones del filtro de fecha.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | 2025-09 |
+| `month_start` | DATE |  | Primer día del mes |
+| `year` | INTEGER |  | Año |
+| `month` | INTEGER |  | Mes |
+| `year_quarter` | VARCHAR |  | 2025-T3 |
+| `month_label` | VARCHAR |  | Sep 25 (eje) |
+| `month_long` | VARCHAR |  | Septiembre 2025 (filtro) |
+
+#### `mart_ventas_mes`
+
+**Mart — grano: mes × canal × provincia** (solo ventas). Ventas, Ticket, Ventas por provincia, meta Córdoba.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes del pedido |
+| `year_quarter` | VARCHAR |  | Trimestre |
+| `channel_key` | INTEGER | PK | Canal |
+| `channel_name` | VARCHAR |  | Nombre del canal |
+| `province_key` | INTEGER | PK | Provincia |
+| `province_code` | VARCHAR |  | Código |
+| `province_name` | VARCHAR |  | Nombre |
+| `ventas` | DECIMAL(14,2) |  | SUM(total_amount) |
+| `pedidos` | INTEGER |  | COUNT(*) |
+
+#### `mart_ventas_producto_mes`
+
+**Mart — grano: mes × canal × provincia × producto** (solo ventas). Ventas con filtro de producto y Ranking.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes del pedido |
+| `year_quarter` | VARCHAR |  | Trimestre |
+| `channel_key` | INTEGER | PK | Canal |
+| `channel_name` | VARCHAR |  | Nombre del canal |
+| `province_key` | INTEGER | PK | Provincia |
+| `province_code` | VARCHAR |  | Código |
+| `province_name` | VARCHAR |  | Nombre |
+| `product_key` | INTEGER | PK | Producto |
+| `product_name` | VARCHAR |  | Nombre del producto |
+| `ventas` | DECIMAL(14,2) |  | SUM(total_amount_allocated) |
+| `pedidos` | INTEGER |  | Pedidos que incluyen el producto (no se suma entre productos) |
+| `ventas_netas` | DECIMAL(14,2) |  | SUM(line_total) — base del ranking |
+| `unidades` | INTEGER |  | SUM(quantity) |
+
+#### `mart_usuarios_activos_rango`
+
+**Mart — grano: rango de meses (desde, hasta).** Conteo distinto precalculado para los 231 rangos posibles.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `desde_mes` | VARCHAR | PK | Primer mes del rango |
+| `hasta_mes` | VARCHAR | PK | Último mes del rango |
+| `meses` | INTEGER |  | Cantidad de meses |
+| `usuarios_activos` | INTEGER |  | COUNT(DISTINCT active_user_id) |
+| `usuarios_logueados` | INTEGER |  | Ídem, solo clientes logueados |
+| `sesiones` | INTEGER |  | Cantidad de sesiones |
+
+#### `mart_nps_mes`
+
+**Mart — grano: mes × canal.** NPS = SUM(puntos_nps) / SUM(respuestas).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes de respuesta |
+| `year_quarter` | VARCHAR |  | Trimestre |
+| `channel_key` | INTEGER | PK | Canal |
+| `channel_name` | VARCHAR |  | Nombre del canal |
+| `respuestas` | INTEGER |  | COUNT(*) |
+| `promotores` | INTEGER |  | SUM(is_promoter) |
+| `pasivos` | INTEGER |  | SUM(is_passive) |
+| `detractores` | INTEGER |  | SUM(is_detractor) |
+| `puntos_nps` | INTEGER |  | SUM(nps_points) |
+
+#### `mart_entregas_mes`
+
+**Mart — grano: mes del pedido × canal × provincia** (envíos entregados). Días promedio = SUM(suma_dias_entrega) / SUM(envios_entregados).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes del pedido |
+| `year_quarter` | VARCHAR |  | Trimestre |
+| `channel_key` | INTEGER | PK | Canal |
+| `channel_name` | VARCHAR |  | Nombre del canal |
+| `province_key` | INTEGER | PK | Provincia |
+| `province_code` | VARCHAR |  | Código |
+| `province_name` | VARCHAR |  | Nombre |
+| `envios_entregados` | INTEGER |  | COUNT(*) |
+| `suma_dias_entrega` | DECIMAL(14,2) |  | SUM(days_to_deliver) |
+
+#### `mart_entregas_producto_mes`
+
+**Mart — grano: mes del pedido × canal × provincia × producto** (envíos entregados de pedidos que incluyen el producto).
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes del pedido |
+| `year_quarter` | VARCHAR |  | Trimestre |
+| `channel_key` | INTEGER | PK | Canal |
+| `channel_name` | VARCHAR |  | Nombre del canal |
+| `province_key` | INTEGER | PK | Provincia |
+| `province_code` | VARCHAR |  | Código |
+| `province_name` | VARCHAR |  | Nombre |
+| `product_key` | INTEGER | PK | Producto |
+| `product_name` | VARCHAR |  | Nombre del producto |
+| `envios_entregados` | INTEGER |  | COUNT(*) (no se suma entre productos) |
+| `suma_dias_entrega` | DECIMAL(14,2) |  | SUM(days_to_deliver) |
+
+## Consultas clave (KPIs) y validaciones
+
+Todas están en [`sql/04_consultas.sql`](./sql/04_consultas.sql) y se muestran en la terminal al correr `run_sql.py`.
+
+**Validaciones (parte A)**
+
+| Control | Qué verifica | Resultado |
+|---|---|---|
+| A1 | Filas de cada hecho = filas de su tabla raw (también clientes y direcciones) | Todas iguales |
+| A2 | Ventas del DW = ventas calculadas en raw; reparto por línea exacto por pedido | $382.410.636 en los tres caminos; 0 pedidos con diferencia |
+| A3 | Cuántas filas apuntan a miembros −1 | Ej.: 122 NPS anónimos, 70.751 sesiones sin login |
+| A4 | Las 42 FK: ninguna huérfana y ninguna NULL | 0 huérfanas, 0 nulas |
+| A5 | Cada mart cierra contra los hechos | Ventas, pedidos, ventas netas, usuarios, NPS y envíos iguales |
+
+**KPIs (parte B)**, sobre todo el período (01/2024 – 09/2025):
 
 | KPI | Resultado |
 |---|---|
@@ -489,29 +734,27 @@ GROUP BY d.month_start, p.name
 ORDER BY mes, puesto;
 ```
 
-El archivo también tiene **controles de calidad** (filas del DW = filas de raw, ventas del DW = ventas calculadas en raw, cantidad de claves −1) y consultas para las **metas del trimestre** (crecimiento de Córdoba y días de entrega por provincia), tasa de cancelación por canal, conversión por origen de tráfico y fallas por medio de pago.
+La parte C tiene las consultas de las **metas del trimestre** (crecimiento de Córdoba y días de entrega por provincia), tasa de cancelación por canal, conversión por origen de tráfico y fallas por medio de pago.
 
 ## Tablero
 
-[`dashboard/index.html`](./dashboard/index.html) — HTML + [Chart.js](https://www.chartjs.org/) + [PapaParse](https://www.papaparse.com/), sin servidor. Lee `dw/fact_orders.csv`, `fact_sales.csv`, `fact_web_sessions.csv`, `fact_nps.csv`, `fact_shipments.csv` y las dimensiones de canal, provincia y producto.
+[`dashboard/index.html`](./dashboard/index.html) — HTML + [Chart.js](https://www.chartjs.org/) + [PapaParse](https://www.papaparse.com/), sin servidor. Lee **solo marts** (`dw/mart_*.csv`) y tres dimensiones chicas para armar las opciones de los filtros.
 
-**Filtros** (arriba, afectan a todo el tablero): período desde / hasta con atajos (últimos 3 y 12 meses, todo), canal, provincia y producto.
+**Filtros** (arriba, afectan a todo el tablero): período desde / hasta (por mes) con atajos (últimos 3 y 12 meses, todo), canal, provincia y producto.
 
-**Vistas:**
+**Qué filtro aplica a cada visual** (✓ filtra · R resalta en lugar de filtrar · — no aplica, y la tarjeta lo avisa):
 
-| Vista | Qué muestra |
-|---|---|
-| Tarjetas | Total Ventas ($M), Usuarios Activos (nK), Ticket Promedio ($K) y NPS (pts), con flecha de variación contra el período anterior de igual duración |
-| Ventas por mes | Serie temporal por canal |
-| Usuarios activos por mes | Serie temporal |
-| Ventas por provincia | Barras con participación %; la provincia filtrada queda resaltada |
-| Ranking mensual por producto | Barras por mes + tabla "Top N" del mes elegido con variación vs. el mes anterior |
-| Tendencia del NPS | Serie mensual por canal |
-| Ticket promedio por mes | Serie temporal |
-| Metas del trimestre | Avance de Córdoba contra el +15 % y días de entrega por provincia con Mendoza resaltada |
-| Hallazgos | Conclusiones del análisis |
+| Visual | Fecha | Canal | Provincia | Producto |
+|---|:-:|:-:|:-:|:-:|
+| Total Ventas, Ticket, Ventas por mes, Ticket por mes | ✓ | ✓ | ✓ | ✓ |
+| Usuarios Activos (tarjeta y serie) | ✓ | solo online (con "Tiendas Físicas" muestra "No aplica") | — | — |
+| NPS (tarjeta y tendencia) | ✓ | ✓ | — | — |
+| Ventas por provincia | ✓ | ✓ | R | ✓ |
+| Ranking mensual por producto | ✓ | ✓ | ✓ | muestra solo ese producto con su puesto |
+| Meta Córdoba | trimestre del mes "Hasta" | ✓ | siempre Córdoba | ✓ |
+| Días de entrega (meta Mendoza) | ✓ | ✓ | R (Mendoza siempre resaltada) | ✓ (pedidos que incluyen el producto) |
 
-Cada gráfico tiene "Ver datos" con la tabla de valores. Cuando un filtro no aplica a un indicador (por ejemplo, la provincia en usuarios activos o NPS), la tarjeta lo aclara. El tablero se adapta a celular y a modo oscuro.
+**Vistas:** tarjetas de Total Ventas ($M), Usuarios Activos (nK), Ticket Promedio ($K) y NPS (pts) con variación contra el período anterior; ventas por mes y canal; usuarios activos por mes; ventas por provincia; ranking mensual por producto (Top N y tabla del mes); tendencia del NPS por canal; ticket por mes; metas del trimestre; hallazgos. Cada gráfico tiene "Ver datos" con la tabla de valores. Se adapta a celular y a modo oscuro.
 
 ## Hallazgos
 
@@ -526,5 +769,6 @@ Cada gráfico tiene "Ver datos" con la tabla de valores. Cuando un filtro no apl
 
 - Entorno virtual `.venv` (ignorado por Git) + `requirements.txt`.
 - `warehouse.duckdb` no se sube: se regenera con `python run_sql.py`. `dw/` sí se sube porque es la fuente del tablero.
-- Commits con [Conventional Commits](https://www.conventionalcommits.org/es/): `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, por ejemplo `feat(sql): agregar dimensiones del modelo estrella`.
+- Archivos binarios: `assets/DER.png` (diagrama de origen del profesor) y `assets/dashboard.png` (captura del tablero que se muestra arriba).
+- Commits con [Conventional Commits](https://www.conventionalcommits.org/es/): `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, por ejemplo `feat(sql): agregar marts para el tablero`.
 - Toda la gestión del repositorio se hace desde la terminal (`git add`, `git commit`, `git push`).
