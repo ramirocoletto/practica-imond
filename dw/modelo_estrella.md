@@ -307,6 +307,18 @@ erDiagram
         INTEGER detractores
         INTEGER puntos_nps
     }
+    mart_ranking_producto_mes {
+        VARCHAR year_month PK
+        INTEGER channel_key PK
+        INTEGER province_key PK
+        INTEGER product_key PK
+        VARCHAR product_name
+        INTEGER puesto
+        DECIMAL ventas_netas
+        INTEGER unidades
+        DECIMAL ventas_netas_mes_anterior
+        DECIMAL variacion_pct
+    }
     mart_usuarios_activos_rango {
         VARCHAR desde_mes PK
         VARCHAR hasta_mes PK

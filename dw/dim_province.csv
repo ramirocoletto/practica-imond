@@ -1,4 +1,5 @@
 province_key,province_id,name,code,iso_3166_2
+-1,,Desconocida,?,
 1,1,Buenos Aires,BA,AR-B
 2,2,Córdoba,CBA,AR-X
 3,3,Santa Fe,SF,AR-S
