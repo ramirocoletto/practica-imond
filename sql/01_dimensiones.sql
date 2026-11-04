@@ -20,10 +20,10 @@
 --
 -- Dimensiones:
 --   dim_date             calendario día a día (+ fila -1 "Sin fecha")
---   dim_channel          canal de venta (ONLINE / OFFLINE)
---   dim_province         provincia (BA, CBA, SF, MZA)
+--   dim_channel          canal de venta (ONLINE / OFFLINE) (+ -1)
+--   dim_province         provincia (BA, CBA, SF, MZA) (+ -1)
 --   dim_address          dirección (calle, ciudad, CP, provincia) (+ -1)
---   dim_product          producto con su categoría y familia aplanadas
+--   dim_product          producto con su categoría y familia aplanadas (+ -1)
 --   dim_store            tienda física (+ fila -1 "Online / sin tienda")
 --   dim_customer         cliente (+ fila -1 "Anónimo / desconocido")
 --   dim_order_status     estado del pedido y si cuenta como venta (+ -1)
@@ -93,10 +93,12 @@ ORDER BY 1;
 -- ---------------------------------------------------------------------
 CREATE TABLE dim_channel (
     channel_key  INTEGER PRIMARY KEY,
-    channel_id   INTEGER NOT NULL UNIQUE,
+    channel_id   INTEGER UNIQUE,            -- NULL en la fila -1
     code         VARCHAR NOT NULL UNIQUE,   -- ONLINE / OFFLINE
     name         VARCHAR NOT NULL
 );
+
+INSERT INTO dim_channel VALUES (-1, NULL, 'UNKNOWN', 'Desconocido');
 
 INSERT INTO dim_channel
 SELECT
@@ -113,11 +115,13 @@ ORDER BY 1;
 -- ---------------------------------------------------------------------
 CREATE TABLE dim_province (
     province_key  INTEGER PRIMARY KEY,
-    province_id   INTEGER NOT NULL UNIQUE,
+    province_id   INTEGER UNIQUE,           -- NULL en la fila -1
     name          VARCHAR NOT NULL,
     code          VARCHAR NOT NULL UNIQUE,  -- BA / CBA / SF / MZA
     iso_3166_2    VARCHAR                   -- código ISO para mapas (AR-B, AR-X, ...)
 );
+
+INSERT INTO dim_province VALUES (-1, NULL, 'Desconocida', '?', NULL);
 
 INSERT INTO dim_province
 SELECT
@@ -187,7 +191,7 @@ ORDER BY 1;
 -- cada producto queda en una sola fila con su categoría y su familia.
 CREATE TABLE dim_product (
     product_key INTEGER PRIMARY KEY,
-    product_id  INTEGER NOT NULL,
+    product_id  INTEGER,                 -- NULL en la fila -1
     sku         VARCHAR NOT NULL,
     name        VARCHAR NOT NULL,
     category    VARCHAR,             -- Classic / Sport
@@ -195,6 +199,8 @@ CREATE TABLE dim_product (
     list_price  DECIMAL(12, 2),
     status      VARCHAR              -- Activo / Inactivo
 );
+
+INSERT INTO dim_product VALUES (-1, NULL, 'UNKNOWN', 'Desconocido', NULL, NULL, NULL, 'Desconocido');
 
 INSERT INTO dim_product
 SELECT
