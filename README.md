@@ -33,7 +33,7 @@ raw/                  datos de origen: un CSV por tabla (no se modifican)
 sql/
   01_dimensiones.sql  15 dimensiones (CREATE TABLE + INSERT ... SELECT)
   02_hechos.sql       6 tablas de hechos con PRIMARY KEY y FOREIGN KEY
-  03_marts.sql        7 marts: una tabla lista para cada visual del tablero
+  03_marts.sql        8 marts: una tabla lista para cada visual del tablero
   04_consultas.sql    validaciones + KPIs + metas y hallazgos
 run_sql.py            arma el data warehouse ejecutando sql/ y exporta a dw/
 dw/                   el data warehouse en CSV (dimensiones, hechos y marts) + diagrama
@@ -100,10 +100,10 @@ raw/*.csv ──► 01_dimensiones.sql ─┐
 | Capa | Lee de | Qué hace |
 |---|---|---|
 | `dim_*` / `fact_*` | `raw.*` | Modelo estrella: claves subrogadas, miembros −1, reglas de negocio (qué es una venta, provincia de envío, usuario activo, categoría NPS) |
-| `mart_*` | **solo** `fact_*` y `dim_*` | Una tabla por visual, ya unida con los nombres de sus dimensiones y agregada por mes, con medidas **aditivas** (sumas y conteos). El único conteo distinto (usuarios activos) se precalcula para cada rango de meses |
-| Tablero | **solo** `mart_*` (+ `dim_channel`, `dim_province`, `dim_product` para llenar los filtros) | Filtra filas, suma columnas y hace la división final de un cociente, como una medida de Power BI / Looker Studio. No hace joins, ni conteos distintos, ni recorre tablas de hechos |
+| `mart_*` | **solo** `fact_*` y `dim_*` | Una tabla por visual, ya unida con los nombres de sus dimensiones y agregada por mes, con medidas **aditivas** (sumas y conteos). El único conteo distinto (usuarios activos) se precalcula para cada rango de meses, y el ranking (puesto y variación contra el mes anterior) para cada combinación de canal y provincia. Las filas salen ordenadas |
+| Tablero | **solo** `mart_*` (+ `dim_channel`, `dim_province`, `dim_product` para llenar los filtros) | Filtra filas, suma columnas y hace la división final de un cociente, como una medida de Power BI / Looker Studio. No hace joins, ni conteos distintos, ni recorre tablas de hechos, ni ordena: el orden y los puestos vienen del ETL |
 
-**Qué calcula el tablero** (todo dentro de "filtrar, sumar y dividir"):
+**Qué hace el tablero con cada mart** (solo filtrar, sumar y dividir; no ordena ni calcula puestos):
 
 | Indicador | Mart | Cálculo en el navegador |
 |---|---|---|
@@ -111,8 +111,8 @@ raw/*.csv ──► 01_dimensiones.sql ─┐
 | Ticket Promedio | ídem | `SUM(ventas) / SUM(pedidos)` |
 | Usuarios Activos | `mart_usuarios_activos_rango` | Se lee la fila `desde_mes`–`hasta_mes` del filtro (sin sumar) |
 | NPS | `mart_nps_mes` | `SUM(puntos_nps) / SUM(respuestas)` |
-| Ventas por provincia | `mart_ventas_mes` | `SUM(ventas)` por provincia y su % sobre el total |
-| Ranking por producto | `mart_ventas_producto_mes` | `SUM(ventas_netas)` por producto y mes, ordenado (Top N) |
+| Ventas por provincia | `mart_ventas_mes` | `SUM(ventas)` por provincia y su % sobre el total; las provincias van en el orden fijo de `dim_province` |
+| Ranking por producto | `mart_ranking_producto_mes` | Filtra las filas del canal y la provincia elegidos (0 = todos) con `puesto <= N`. El puesto, las ventas netas y la variación contra el mes anterior vienen del mart |
 | Variación vs. período anterior / meta Córdoba | `mart_ventas_mes` | Cociente de dos sumas − 1 |
 | Días de entrega | `mart_entregas_mes` (o `_producto_mes`) | `SUM(suma_dias_entrega) / SUM(envios_entregados)` por provincia y trimestre |
 
@@ -194,11 +194,11 @@ Las 13 tablas de `raw/` quedan cubiertas: `product_category` se aplana en `dim_p
 
 1. **Qué es una venta:** solo los pedidos con estado `PAID` o `FULFILLED` (regla de la consigna, guardada en `dim_order_status.is_sale`). Los hechos guardan **todos** los pedidos, para poder analizar también cancelaciones y reembolsos.
 2. **Montos:** `total_amount` incluye IVA (21 %) y costo de envío; `line_total` es neto, sin IVA. "Total Ventas" y "Ticket Promedio" usan `total_amount`; el "Ranking por producto" usa `line_total`, como pide la consigna.
-3. **Ventas filtradas por producto:** un pedido puede tener los dos productos y `total_amount` es de cabecera. Para no duplicarlo, `fact_sales.total_amount_allocated` reparte el total del pedido entre sus líneas en proporción a `line_total`. Cada línea se redondea a centavos y la última línea de cada pedido absorbe la diferencia de redondeo, así la suma por pedido es **exacta** (control A2: 0 pedidos con diferencia).
-4. **Provincia de una venta:** la de la **dirección de envío** (`shipping_address_id → address.province_id`). En compras en tienda es la dirección de la tienda.
+3. **Ventas y ticket filtrados por producto:** un pedido puede tener los dos productos y `total_amount` es de cabecera. Para no duplicarlo, `fact_sales.total_amount_allocated` reparte el total del pedido entre sus líneas en proporción a `line_total`. Cada línea se redondea a centavos y la última línea de cada pedido absorbe la diferencia de redondeo, así la suma por pedido es **exacta** (control A2: 0 pedidos con diferencia). Con un producto elegido, **Ventas** = total asignado a ese producto y **Ticket** = ventas asignadas al producto ÷ pedidos que lo incluyen (es el ticket de la parte del pedido que corresponde al producto, no el del pedido completo; la tarjeta lo aclara).
+4. **Provincia de una venta:** la de la **dirección de envío** (`shipping_address_id → address.province_id`). En la mayoría de las compras en tienda la dirección de envío es la de la tienda; 240 pedidos de tienda (228 de ellos ventas) tienen otra dirección de envío, porque la tienda los mandó a domicilio. En estos datos esa dirección siempre está en la misma provincia que la tienda. Hay 102 pedidos (94 de ellos ventas) con provincia de facturación distinta a la de envío: se usa la de envío, como pide la consigna.
 5. **Usuarios activos:** `COUNT(DISTINCT active_user_id)`, donde `active_user_id` es `C-<customer_id>` si la persona inició sesión y `S-<session_id>` si es anónima (cada sesión anónima cuenta como un usuario). La sesión se asigna a la fecha en que **empezó** (`started_at`). Las sesiones son del canal ONLINE y no tienen provincia ni producto.
 6. **NPS:** `(%9-10 − %0-6) × 100`. Las categorías están en `dim_nps_category`; cada respuesta aporta `nps_points` (+100 / 0 / −100), así el NPS es `SUM(puntos) / respuestas`. La respuesta se asigna a la fecha en que se respondió y no tiene pedido asociado: se analiza por canal, no por provincia ni producto.
-7. **Datos faltantes:** ninguna FK queda en NULL. Lo que falta apunta al miembro **−1** de su dimensión: cliente anónimo, pedido online sin tienda, pedido sin dirección de facturación, fecha de un evento que no ocurrió (`paid_date_key`, `shipped_date_key`, `delivered_date_key` = −1 "Sin fecha"), origen o dispositivo sin dato, y cualquier código de estado, medio de pago o correo que no esté en la dimensión.
+7. **Datos faltantes:** ninguna FK queda en NULL. Todas las dimensiones que un hecho puede no encontrar tienen miembro **−1** (también canal, provincia, producto y dirección), y los hechos se unen con `LEFT JOIN … COALESCE(clave, -1)`: cliente anónimo, pedido online sin tienda, pedido sin dirección de facturación, fecha de un evento que no ocurrió (`paid_date_key`, `shipped_date_key`, `delivered_date_key` = −1 "Sin fecha"), origen o dispositivo sin dato, y cualquier código de canal, provincia, producto, estado, medio de pago o correo que no esté en su dimensión. La única unión obligatoria es la de cada línea, pago o envío con su pedido en `raw.sales_order` (sin pedido no hay fecha); el control A1 confirma que no se pierde ninguna fila.
 8. **Catálogos desde raw:** `dim_order_status`, `dim_payment_method`, `dim_payment_status`, `dim_shipment_status`, `dim_carrier`, `dim_traffic_source` y `dim_device` se cargan con los valores **distintos** de `raw/`; las descripciones en español se agregan con `CASE`. Un código nuevo entra solo a la dimensión (con su código como descripción) y los hechos se unen con `LEFT JOIN … COALESCE(clave, -1)`, así no se pierde ninguna fila (control A1).
 9. **Clasificación de marketing** (`dim_traffic_source.marketing_type`, propia): *Pago* = `ads` (publicidad en redes); *Propio* = `direct` y `referral` (canales de la marca y newsletter); *Ganado* = `organic` (buscadores).
 10. **Dimensiones degeneradas:** `order_id`, `tracking_number`, `transaction_ref`, `active_user_id` y el comentario del NPS quedan en los hechos porque son identificadores o texto libre sin atributos propios.
@@ -210,8 +210,9 @@ Las 13 tablas de `raw/` quedan cubiertas: `product_category` se aplana en `dim_p
 13. **Filtro de fecha mensual:** los marts agregan por mes, así que el filtro de fecha elige meses (desde / hasta). Los hechos sí tienen la fecha diaria, por si se necesitara otro mart.
 14. **Período anterior:** las flechas de las tarjetas comparan contra los mismos meses inmediatamente anteriores al rango elegido (ej. jul–sep 2025 contra abr–jun 2025). Si el rango empieza en enero de 2024 no hay período anterior.
 15. **Meta Córdoba (+15 %):** se toma el trimestre del mes "Hasta" (hasta ese mes inclusive) y se compara contra los mismos meses del año anterior, para no mezclar estacionalidad. Respeta los filtros de canal y producto; la provincia es siempre Córdoba. Si el mes "Hasta" es de 2024 no hay año anterior para comparar.
-16. **Gráficos de comparación:** "Ventas por provincia" y "Días de entrega" comparan provincias, por eso el filtro de provincia **resalta** la elegida en lugar de ocultar las demás (el tablero lo avisa). El ranking ordena todos los productos; con filtro de producto muestra solo ese producto con su puesto real.
-17. **Tablero en GitHub Pages en lugar de Looker Studio / Power BI:** se trabaja en Mac (Power BI Desktop no existe para macOS). El tablero es una página estática que lee los marts de `dw/`.
+16. **Gráficos de comparación:** "Ventas por provincia" y "Días de entrega" comparan provincias, por eso el filtro de provincia **resalta** la elegida en lugar de ocultar las demás (el tablero lo avisa). Las provincias se muestran en el orden fijo de `dim_province`.
+17. **Ranking mensual por producto:** el **Top N es de cada mes**: el gráfico muestra, mes a mes, los N productos con mejor puesto en ese mes (con Top 1 se ve el líder de cada mes: Sport B en 12 meses, Classic A en 9). El puesto se calcula con `RANK()` en el ETL para cada combinación de canal y provincia, y la variación "vs. mes ant." se calcula sobre todos los meses, así que no depende del rango elegido (ej. diciembre 2024 se compara con noviembre aunque el filtro empiece en diciembre). Con filtro de producto se muestra solo ese producto con su puesto real dentro del ranking.
+18. **Herramienta del tablero (desvío de la consigna):** la consigna oficial pide el tablero en **Looker Studio** y el README del repositorio del docente menciona Power BI. Este trabajo entrega el tablero como página web publicada en **GitHub Pages**, por decisión propia, y queda **a confirmar con el docente**. La página cumple las vistas y los filtros pedidos y lee únicamente los marts de `dw/`; esos mismos CSV sirven como fuente para armar el tablero en Looker Studio (conector de carga de archivos o Google Sheets) si se requiere.
 
 ## Diccionario de datos
 
@@ -242,23 +243,23 @@ Calendario día a día (01/01/2024 – 30/09/2025) + fila −1 "Sin fecha".
 
 #### `dim_channel`
 
-Canal de venta.
+Canal de venta + fila −1 "Desconocido".
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `channel_key` | INTEGER | PK | Clave subrogada |
-| `channel_id` | INTEGER |  | Clave natural (raw.channel) |
-| `code` | VARCHAR |  | ONLINE / OFFLINE |
+| `channel_key` | INTEGER | PK | Clave subrogada (−1 = desconocido) |
+| `channel_id` | INTEGER |  | Clave natural (raw.channel); NULL en −1 |
+| `code` | VARCHAR |  | ONLINE / OFFLINE (UNKNOWN en −1) |
 | `name` | VARCHAR |  | Tienda Online / Tiendas Físicas |
 
 #### `dim_province`
 
-Provincia.
+Provincia + fila −1 "Desconocida".
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `province_key` | INTEGER | PK | Clave subrogada |
-| `province_id` | INTEGER |  | Clave natural (raw.province) |
+| `province_key` | INTEGER | PK | Clave subrogada (−1 = desconocida) |
+| `province_id` | INTEGER |  | Clave natural (raw.province); NULL en −1 |
 | `name` | VARCHAR |  | Buenos Aires, Córdoba, Santa Fe, Mendoza |
 | `code` | VARCHAR |  | BA / CBA / SF / MZA |
 | `iso_3166_2` | VARCHAR |  | Código ISO para mapas (AR-B, AR-X, AR-S, AR-M) |
@@ -283,12 +284,12 @@ Dirección (geografía al nivel más fino) + fila −1 "Desconocida".
 
 #### `dim_product`
 
-Producto con la jerarquía de categorías aplanada.
+Producto con la jerarquía de categorías aplanada + fila −1 "Desconocido".
 
 | Columna | Tipo | Clave | Descripción / dominio |
 |---|---|---|---|
-| `product_key` | INTEGER | PK | Clave subrogada |
-| `product_id` | INTEGER |  | Clave natural (raw.product) |
+| `product_key` | INTEGER | PK | Clave subrogada (−1 = desconocido) |
+| `product_id` | INTEGER |  | Clave natural (raw.product); NULL en −1 |
 | `sku` | VARCHAR |  | Código de producto |
 | `name` | VARCHAR |  | Classic A Bottle / Sport B Bottle |
 | `category` | VARCHAR |  | Classic / Sport |
@@ -591,6 +592,23 @@ Categoría NPS, con los rangos de la definición del NPS.
 | `ventas_netas` | DECIMAL(14,2) |  | SUM(line_total) — base del ranking |
 | `unidades` | INTEGER |  | SUM(quantity) |
 
+#### `mart_ranking_producto_mes`
+
+**Mart — grano: mes × canal × provincia × producto, con totales** (`channel_key` = 0 → todos los canales; `province_key` = 0 → todas las provincias). Puesto y variación ya calculados para cada combinación de filtros.
+
+| Columna | Tipo | Clave | Descripción / dominio |
+|---|---|---|---|
+| `year_month` | VARCHAR | PK | Mes del pedido |
+| `channel_key` | INTEGER | PK | Canal (0 = todos) |
+| `province_key` | INTEGER | PK | Provincia (0 = todas) |
+| `product_key` | INTEGER | PK | Producto |
+| `product_name` | VARCHAR |  | Nombre del producto |
+| `puesto` | INTEGER |  | RANK() por ventas netas en ese mes y combinación (1 = más vendido) |
+| `ventas_netas` | DECIMAL(14,2) |  | SUM(line_total) |
+| `unidades` | INTEGER |  | SUM(quantity) |
+| `ventas_netas_mes_anterior` | DECIMAL(14,2) |  | Ventas netas del mes anterior (NULL en el primer mes) |
+| `variacion_pct` | DECIMAL(8,2) |  | (ventas_netas / mes anterior − 1) × 100 |
+
 #### `mart_usuarios_activos_rango`
 
 **Mart — grano: rango de meses (desde, hasta).** Conteo distinto precalculado para los 231 rangos posibles.
@@ -666,7 +684,8 @@ Todas están en [`sql/04_consultas.sql`](./sql/04_consultas.sql) y se muestran e
 | A2 | Ventas del DW = ventas calculadas en raw; reparto por línea exacto por pedido | $382.410.636 en los tres caminos; 0 pedidos con diferencia |
 | A3 | Cuántas filas apuntan a miembros −1 | Ej.: 122 NPS anónimos, 70.751 sesiones sin login |
 | A4 | Las 42 FK: ninguna huérfana y ninguna NULL | 0 huérfanas, 0 nulas |
-| A5 | Cada mart cierra contra los hechos | Ventas, pedidos, ventas netas, usuarios, NPS y envíos iguales |
+| A5 | Cada mart cierra contra los hechos | Ventas, pedidos, ventas netas, usuarios, NPS, envíos y ranking iguales |
+| A6 | El puesto del mart de ranking = `RANK()` recalculado sobre `fact_sales`, en todos los meses y combinaciones de canal y provincia | 630 puestos comparados, 0 distintos |
 
 **KPIs (parte B)**, sobre todo el período (01/2024 – 09/2025):
 
@@ -746,11 +765,11 @@ La parte C tiene las consultas de las **metas del trimestre** (crecimiento de C�
 
 | Visual | Fecha | Canal | Provincia | Producto |
 |---|:-:|:-:|:-:|:-:|
-| Total Ventas, Ticket, Ventas por mes, Ticket por mes | ✓ | ✓ | ✓ | ✓ |
+| Total Ventas, Ticket, Ventas por mes, Ticket por mes | ✓ | ✓ | ✓ | ✓ (ver supuesto 3 para el ticket) |
 | Usuarios Activos (tarjeta y serie) | ✓ | solo online (con "Tiendas Físicas" muestra "No aplica") | — | — |
 | NPS (tarjeta y tendencia) | ✓ | ✓ | — | — |
 | Ventas por provincia | ✓ | ✓ | R | ✓ |
-| Ranking mensual por producto | ✓ | ✓ | ✓ | muestra solo ese producto con su puesto |
+| Ranking mensual por producto (Top N de cada mes) | ✓ | ✓ | ✓ | muestra solo ese producto con su puesto |
 | Meta Córdoba | trimestre del mes "Hasta" | ✓ | siempre Córdoba | ✓ |
 | Días de entrega (meta Mendoza) | ✓ | ✓ | R (Mendoza siempre resaltada) | ✓ (pedidos que incluyen el producto) |
 
@@ -763,7 +782,7 @@ La parte C tiene las consultas de las **metas del trimestre** (crecimiento de C�
 - **Córdoba ya superó la meta:** 2025-T3 vendió **+25,3 %** contra 2024-T3 (meta +15 %), aunque baja −5,3 % contra 2025-T2.
 - **Mendoza no es la provincia más lenta:** en 2025-T3 tarda 5,3 días, contra 5,5 de Córdoba, 5,2 de Santa Fe y 3,4 de Buenos Aires. La meta logística debería incluir a Córdoba.
 - **Mercado Pago tiene 9,8 % de pagos fallidos** (tarjeta 4,0 %): revisar la pasarela podría recuperar ventas online.
-- **Estacionalidad:** diciembre es el pico de ventas y de usuarios activos; Sport B lidera en verano (dic–feb) y en junio, y Classic A en invierno (jul–sep).
+- **Estacionalidad:** diciembre es el pico de ventas y de usuarios activos. Sport B lidera 12 de los 21 meses (dic–feb, may–jun, oct–nov y sep 2025) y Classic A los otros 9 (mar–abr, jul–ago y sep 2024).
 
 ## Convenciones del repositorio
 
