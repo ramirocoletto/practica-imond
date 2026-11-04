@@ -1,0 +1,6 @@
+source_key,source_code,description,marketing_type
+-1,unknown,Sin dato,Sin dato
+1,ads,Publicidad en redes,Pago
+2,direct,Directo / newsletter,Propio
+3,referral,Referidos / newsletter,Propio
+4,organic,Buscadores (orgánico),Ganado

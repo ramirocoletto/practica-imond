@@ -1,0 +1,5 @@
+device_key,device_code,description
+-1,unknown,Sin dato
+1,desktop,Computadora
+2,mobile,Celular
+3,tablet,Tablet

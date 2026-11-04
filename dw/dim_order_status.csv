@@ -1,0 +1,6 @@
+status_key,status_code,description,is_sale
+1,CREATED,"Creado, todavía sin pagar",false
+2,PAID,"Pagado, pendiente de entrega",true
+3,FULFILLED,Entregado / comprado en tienda,true
+4,CANCELLED,Cancelado,false
+5,REFUNDED,Entregado y luego reembolsado,false

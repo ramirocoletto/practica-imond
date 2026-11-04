@@ -1,0 +1,6 @@
+store_key,store_id,name,address_line,city,province_name,province_code
+-1,,Online (sin tienda),,,,
+1,1,Tienda BA,Av. 7 1045,La Plata,Buenos Aires,BA
+2,2,Tienda CBA,Av. Colón 480,Córdoba,Córdoba,CBA
+3,3,Tienda SF,San Martín 850,Rosario,Santa Fe,SF
+4,4,Tienda MZA,Av. San Martín 1150,Mendoza,Mendoza,MZA
